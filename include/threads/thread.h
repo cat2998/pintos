@@ -150,5 +150,6 @@ void thread_awake(int64_t ticks);
 /* priority schedule */
 bool compare_priority(const struct list_elem *a, const struct list_elem *b, void *aux);
 void imm_preempt(struct thread *t);
+void ready_list_preempt();
 
 #endif /* threads/thread.h */
