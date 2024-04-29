@@ -107,8 +107,8 @@ void sema_up(struct semaphore *sema) {
         thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread, elem));
     }
     sema->value++;
-    intr_set_level(old_level);
     ready_list_preempt();
+    intr_set_level(old_level);
 }
 
 static void sema_test_helper(void *sema_);
@@ -286,10 +286,9 @@ void cond_signal(struct condition *cond, struct lock *lock UNUSED) {
     ASSERT(!intr_context());
     ASSERT(lock_held_by_current_thread(lock));
 
+    list_sort(&cond->waiters, compare_cond_priority, NULL);
     if (!list_empty(&cond->waiters))
-        sema_up(&list_entry(list_pop_front(&cond->waiters),
-                            struct semaphore_elem, elem)
-                     ->semaphore);
+        sema_up(&list_entry(list_pop_front(&cond->waiters), struct semaphore_elem, elem)->semaphore);
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
@@ -304,4 +303,12 @@ void cond_broadcast(struct condition *cond, struct lock *lock) {
 
     while (!list_empty(&cond->waiters))
         cond_signal(cond, lock);
+}
+
+bool compare_cond_priority(const struct list_elem *a, const struct list_elem *b, void *aux) {
+    struct semaphore_elem *semae_a = list_entry(a, struct semaphore_elem, elem);
+    struct semaphore_elem *semae_b = list_entry(b, struct semaphore_elem, elem);
+    struct semaphore *sema_a = &semae_a->semaphore;
+    struct semaphore *sema_b = &semae_b->semaphore;
+    return compare_priority(list_begin(&sema_a->waiters), list_begin(&sema_b->waiters), aux);
 }
