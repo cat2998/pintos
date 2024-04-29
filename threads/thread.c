@@ -27,6 +27,7 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
+static struct list sleep_list;
 
 /* Idle thread. */
 static struct thread *idle_thread;
@@ -105,6 +106,7 @@ void thread_init(void) {
     /* Init the globla thread context */
     lock_init(&tid_lock);
     list_init(&ready_list);
+    list_init(&sleep_list);
     list_init(&destruction_req);
 
     /* Set up a thread structure for the running thread. */
@@ -120,7 +122,6 @@ void thread_start(void) {
     /* Create the idle thread. */
     struct semaphore idle_started;
     sema_init(&idle_started, 0);
-    // idle_thread 실행(kenerl의 main thread)
     thread_create("idle", PRI_MIN, idle, &idle_started);
 
     /* Start preemptive thread scheduling. */
@@ -171,7 +172,6 @@ void thread_print_stats(void) {
    The code provided sets the new thread's `priority' member to
    PRIORITY, but no actual priority scheduling is implemented.
    Priority scheduling is the goal of Problem 1-3. */
-
 tid_t thread_create(const char *name, int priority,
                     thread_func *function, void *aux) {
     struct thread *t;
@@ -298,6 +298,36 @@ void thread_yield(void) {
     intr_set_level(old_level);
 }
 
+void thread_sleep(int64_t wake_tick) {
+    struct thread *curr = thread_current();
+    enum intr_level old_level;
+
+    ASSERT(!intr_context());
+    curr->wake_tick = wake_tick;
+
+    old_level = intr_disable();
+    if (curr != idle_thread)
+        list_push_back(&sleep_list, &curr->elem);
+    do_schedule(THREAD_BLOCKED);
+    intr_set_level(old_level);
+}
+
+void thread_awake(int64_t ticks) {
+    struct thread *awake;
+    struct list_elem *e;
+
+    ASSERT(intr_context()); /* 너 인터럽트 context이니? */
+
+    for (e = list_begin(&sleep_list); e != list_end(&sleep_list);) {
+        awake = list_entry(e, struct thread, elem);
+        if (awake->wake_tick <= ticks) {
+            e = list_remove(e);
+            thread_unblock(awake);
+        } else
+            e = list_next(e);
+    }
+}
+
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void thread_set_priority(int new_priority) {
     thread_current()->priority = new_priority;
@@ -369,19 +399,12 @@ idle(void *idle_started_ UNUSED) {
 }
 
 /* Function used as the basis for a kernel thread. */
-// function =>kernel이 실행할 함수, aux=>동기화를 위한 세마포 등
 static void
 kernel_thread(thread_func *function, void *aux) {
     ASSERT(function != NULL);
 
     intr_enable(); /* The scheduler runs with interrupts off. */
-    function(aux); // 스레드가 종료될때까지 실행되는 main함수
-                   /*
-                    * 즉,이 function은 idle thread라고 불리는 thread 를 하나 실행시키는데,
-                    * 이 idle thread 는 하나의 c 프로그램에서 하나의 main 함수 안에서 여러 함수호출들이 이루어지는 것처럼,
-                    * pintos kernel 위에서 여러 thread 들이 동시에 실행될 수 있도록 하는 단 하나의 main thread 인 셈이다.
-                    * 우리의 목적은 이 idle thread 위에 여러 thread 들이 동시에 실행되도록 만드는 것
-                    */
+    function(aux); /* Execute the thread function. */
     thread_exit(); /* If function() returns, kill the thread. */
 }
 
@@ -531,11 +554,8 @@ schedule(void) {
     struct thread *curr = running_thread();
     struct thread *next = next_thread_to_run();
 
-    // scheduling 도중에는 인터럽트 발생하면 안되기때문에 확인
     ASSERT(intr_get_level() == INTR_OFF);
-    // cpu소유권을 넘겨주기 전에 running 스레드는 그 상태를 running외의 다른 상태로 바꿔주는 작업이 되어있어야함
     ASSERT(curr->status != THREAD_RUNNING);
-    // next_thread_to_run()에 의해 thread가 잘 반환되었는지 확인
     ASSERT(is_thread(next));
     /* Mark us as running. */
     next->status = THREAD_RUNNING;
@@ -556,10 +576,9 @@ schedule(void) {
            currently used by the stack.
            The real destruction logic will be called at the beginning of the
            schedule(). */
-        // 실행중인 스레드(교체전에 실행하던 스레드)가 존재하고, dying이고, initial 스레드가 아닐때
         if (curr && curr->status == THREAD_DYING && curr != initial_thread) {
             ASSERT(curr != next);
-            list_push_back(&destruction_req, &curr->elem); // 맨뒤에 넣어줌
+            list_push_back(&destruction_req, &curr->elem);
         }
 
         /* Before switching the thread, we first save the information
