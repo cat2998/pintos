@@ -141,10 +141,14 @@ void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
 
+void do_iret(struct intr_frame *tf);
+
 /* alarm clock function*/
 void thread_sleep(int64_t wake_tick);
 void thread_awake(int64_t ticks);
 
-void do_iret(struct intr_frame *tf);
+/* priority schedule */
+bool compare_priority(const struct list_elem *a, const struct list_elem *b, void *aux);
+void imm_preempt(struct thread *t);
 
 #endif /* threads/thread.h */
