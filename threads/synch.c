@@ -174,12 +174,26 @@ void lock_init(struct lock *lock) {
    interrupts disabled, but interrupts will be turned back on if
    we need to sleep. */
 void lock_acquire(struct lock *lock) {
+    struct thread *curr = thread_current();
+    struct lock *lock_t = lock;
+
     ASSERT(lock != NULL);
     ASSERT(!intr_context());
     ASSERT(!lock_held_by_current_thread(lock));
 
+    if (lock->holder) {
+        curr->wait_on_lock = lock;
+        while (curr && lock_t) {
+            donate_priority(lock_t, curr);
+            if (!curr->wait_on_lock)
+                break;
+            curr = curr->wait_on_lock->holder;
+            lock_t = curr->wait_on_lock;
+        }
+    }
     sema_down(&lock->semaphore);
     lock->holder = thread_current();
+    thread_current()->wait_on_lock = NULL;
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -211,6 +225,7 @@ void lock_release(struct lock *lock) {
     ASSERT(lock_held_by_current_thread(lock));
 
     lock->holder = NULL;
+    thread_current()->priority = thread_current()->origin_priority;
     sema_up(&lock->semaphore);
 }
 
@@ -311,4 +326,9 @@ bool compare_cond_priority(const struct list_elem *a, const struct list_elem *b,
     struct semaphore *sema_a = &semae_a->semaphore;
     struct semaphore *sema_b = &semae_b->semaphore;
     return compare_priority(list_begin(&sema_a->waiters), list_begin(&sema_b->waiters), aux);
+}
+
+void donate_priority(struct lock *lock, struct thread *curr) {
+    if (lock->holder->priority < curr->priority)
+        lock->holder->priority = curr->priority;
 }
