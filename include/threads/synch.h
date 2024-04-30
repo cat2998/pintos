@@ -18,8 +18,8 @@ void sema_self_test(void);
 
 /* Lock. */
 struct lock {
-    struct thread *holder;      /* Thread holding lock (for debugging). */
-    struct semaphore semaphore; /* Binary semaphore controlling access. */
+    struct thread *holder;      /* lock을 소유한 thread */
+    struct semaphore semaphore; /* Binary semaphore */
 };
 
 void lock_init(struct lock *);
@@ -39,6 +39,7 @@ void cond_signal(struct condition *, struct lock *);
 void cond_broadcast(struct condition *, struct lock *);
 
 bool compare_cond_priority(const struct list_elem *a, const struct list_elem *b, void *aux);
+void donate_priority(struct lock *lock, struct thread *curr);
 
 /* Optimization barrier.
  *
