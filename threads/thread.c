@@ -64,6 +64,8 @@ static void do_schedule(int status);
 static void schedule(void);
 static tid_t allocate_tid(void);
 
+static void thread_launch(struct thread *th);
+
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
 
@@ -172,9 +174,10 @@ void thread_print_stats(void) {
    The code provided sets the new thread's `priority' member to
    PRIORITY, but no actual priority scheduling is implemented.
    Priority scheduling is the goal of Problem 1-3. */
-tid_t thread_create(const char *name, int priority,
-                    thread_func *function, void *aux) {
+tid_t thread_create(const char *name, int priority, thread_func *function, void *aux) {
     struct thread *t;
+    struct thread *curr = thread_current();
+
     tid_t tid;
 
     ASSERT(function != NULL);
@@ -199,10 +202,28 @@ tid_t thread_create(const char *name, int priority,
     t->tf.cs = SEL_KCSEG;
     t->tf.eflags = FLAG_IF;
 
+    if (curr->priority < t->priority)
+        imm_preempt(t);
     /* Add to run queue. */
-    thread_unblock(t);
+    else
+        thread_unblock(t);
 
     return tid;
+}
+
+void imm_preempt(struct thread *t) {
+    struct thread *curr = thread_current();
+    enum intr_level old_level;
+
+    old_level = intr_disable();
+
+    t->status = THREAD_RUNNING;
+    curr->status = THREAD_READY;
+    thread_ticks = 0;
+    list_insert_ordered(&ready_list, &curr->elem, compare_priority, NULL);
+    thread_launch(t);
+
+    intr_set_level(old_level);
 }
 
 /* Puts the current thread to sleep.  It will not be scheduled
@@ -233,7 +254,8 @@ void thread_unblock(struct thread *t) {
 
     old_level = intr_disable();
     ASSERT(t->status == THREAD_BLOCKED);
-    list_push_back(&ready_list, &t->elem);
+    // list_push_back(&ready_list, &t->elem);
+    list_insert_ordered(&ready_list, &t->elem, compare_priority, NULL);
     t->status = THREAD_READY;
     intr_set_level(old_level);
 }
@@ -293,7 +315,7 @@ void thread_yield(void) {
 
     old_level = intr_disable();
     if (curr != idle_thread)
-        list_push_back(&ready_list, &curr->elem);
+        list_insert_ordered(&ready_list, &curr->elem, compare_priority, NULL);
     do_schedule(THREAD_READY);
     intr_set_level(old_level);
 }
@@ -330,7 +352,20 @@ void thread_awake(int64_t ticks) {
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void thread_set_priority(int new_priority) {
-    thread_current()->priority = new_priority;
+    struct thread *next = next_thread_to_run();
+    struct thread *curr = thread_current();
+
+    curr->priority = new_priority;
+    curr->origin_priority = new_priority;
+
+    if (!list_empty(&curr->donations)) {
+        list_sort(&curr->donations,compare_priority,NULL);
+        struct thread *priory_thread = list_entry(list_begin(&curr->donations), struct thread, d_elem);
+        donate_priority(priory_thread->wait_on_lock, priory_thread);
+    }
+
+    if (next->priority > new_priority)
+        imm_preempt(next);
 }
 
 /* Returns the current thread's priority. */
@@ -421,7 +456,11 @@ init_thread(struct thread *t, const char *name, int priority) {
     strlcpy(t->name, name, sizeof t->name);
     t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
     t->priority = priority;
+    t->origin_priority = priority;
+    t->wait_on_lock = NULL;
     t->magic = THREAD_MAGIC;
+
+    list_init(&t->donations);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -598,4 +637,16 @@ allocate_tid(void) {
     lock_release(&tid_lock);
 
     return tid;
+}
+
+bool compare_priority(const struct list_elem *a, const struct list_elem *b, void *aux) {
+    struct thread *thread_a = list_entry(a, struct thread, elem);
+    struct thread *thread_b = list_entry(b, struct thread, elem);
+    return thread_a->priority > thread_b->priority;
+}
+
+void ready_list_preempt() {
+    struct thread *t = list_entry(list_begin(&ready_list), struct thread, elem);
+    if (thread_current()->priority < t->priority)
+        thread_yield();
 }
