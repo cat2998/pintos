@@ -647,6 +647,8 @@ bool compare_priority(const struct list_elem *a, const struct list_elem *b, void
 
 void ready_list_preempt() {
     struct thread *t = list_entry(list_begin(&ready_list), struct thread, elem);
-    if (thread_current()->priority < t->priority)
+    
+    if (!intr_context() && thread_current()->priority < t->priority)
         thread_yield();
+    
 }
