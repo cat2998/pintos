@@ -199,6 +199,7 @@ int process_wait(tid_t child_tid UNUSED) {
     /* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
      * XXX:       to add infinite loop here before
      * XXX:       implementing the process_wait. */
+    thread_sleep(0);
     return -1;
 }
 
@@ -321,6 +322,10 @@ load(const char *file_name, struct intr_frame *if_) {
     off_t file_ofs;
     bool success = false;
     int i;
+    uint64_t argc;
+    char *argv[128];
+
+    argument_parsing(file_name, &argc, argv);
 
     /* Allocate and activate page directory. */
     t->pml4 = pml4_create();
@@ -402,6 +407,7 @@ load(const char *file_name, struct intr_frame *if_) {
 
     /* TODO: Your code goes here.
      * TODO: Implement argument passing (see project2/argument_passing.html). */
+    setup_user_stack(if_, argc, argv);
 
     success = true;
 
@@ -621,3 +627,36 @@ setup_stack(struct intr_frame *if_) {
     return success;
 }
 #endif /* VM */
+
+void argument_parsing(char *file_name, uint64_t *argc, char *argv[]) {
+    char *token, *save_ptr;
+
+    int i = 0;
+    for (token = strtok_r(file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr))
+        argv[i++] = token;
+    *argc = i;
+}
+
+void setup_user_stack(struct intr_frame *if_, uint64_t argc, char *argv[]) {
+    uintptr_t rsp = if_->rsp;
+    int acc_l = 0, l = 0;
+    uintptr_t temp[argc];
+
+    for (int i = argc - 1; i >= 0; i--) {
+        l = strlen(argv[i]) + 1;
+        rsp -= l;
+        acc_l += l;
+        temp[i] = rsp;
+        memcpy(rsp, argv[i], l);
+    }
+    rsp -= WORD_SIZE - (acc_l % WORD_SIZE); // padding
+    rsp -= WORD_SIZE;                       // NULL pointer boundary
+    for (int i = argc - 1; i >= 0; i--) {
+        rsp -= WORD_SIZE;
+        memcpy(rsp, &temp[i], WORD_SIZE);
+    }
+    rsp -= WORD_SIZE;
+    if_->rsp = rsp;
+    if_->R.rdi = argc;
+    if_->R.rsi = temp[0];
+}
