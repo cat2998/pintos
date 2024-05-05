@@ -38,7 +38,36 @@ void syscall_init(void) {
 
 /* The main system call interface */
 void syscall_handler(struct intr_frame *f UNUSED) {
-    // TODO: Your implementation goes here.
+    uint64_t syscall_num = f->R.rax;
+        // TODO: Your implementation goes here.
+    struct thread *curr = thread_current();
+    switch (syscall_num)
+    {
+    case SYS_HALT:
+        power_off();    /* Halt the operating system. */
+    case SYS_EXIT:    /* Terminate this process. */
+    case SYS_FORK:     /* Clone current process. */
+    case SYS_EXEC:     /* Switch current process. */
+    case SYS_WAIT:     /* Wait for a child process to die. */
+    case SYS_CREATE:   /* Create a file. */
+    case SYS_REMOVE:   /* Delete a file. */
+    case SYS_OPEN:     /* Open a file. */
+    case SYS_FILESIZE: /* Obtain a file's size. */
+    case SYS_READ:     /* Read from a file. */
+    case SYS_WRITE:    /* Write to a file. */
+    case SYS_SEEK:     /* Change position in a file. */
+    case SYS_TELL:     /* Report current position in a file. */
+    case SYS_CLOSE: /* Close a file. */
+        /* code */
+        break;
+    
+    default:
+        break;
+    }
     printf("system call!\n");
     thread_exit();
+}
+
+void check_addr(struct intr_frame *f UNUSED){
+
 }
