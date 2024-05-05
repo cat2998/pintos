@@ -88,6 +88,7 @@ struct thread {
     /* Owned by thread.c. */
     tid_t tid;                 /* Thread identifier. */
     enum thread_status status; /* Thread state. */
+    int exit_status;           /* exit state. */
     char name[16];             /* Name (for debugging purposes). */
     int priority;              /* Priority. */
     int origin_priority;       /* origin Priority*/
@@ -95,7 +96,7 @@ struct thread {
 
     struct list donations;     /* 기부해준 스레드 리스트 */
     struct lock *wait_on_lock; /* 내가 기다리는 lock */
-        
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;   /* List element. */
     struct list_elem d_elem; /* donations element*/
