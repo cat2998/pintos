@@ -49,6 +49,9 @@ tid_t process_create_initd(const char *file_name) {
         return TID_ERROR;
     strlcpy(fn_copy, file_name, PGSIZE);
 
+    char **save_ptr;
+    strtok_r(file_name, " ", save_ptr);
+
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
     if (tid == TID_ERROR)
@@ -655,8 +658,8 @@ void setup_user_stack(struct intr_frame *if_, uint64_t argc, char *argv[]) {
         rsp -= WORD_SIZE;
         memcpy(rsp, &temp[i], WORD_SIZE);
     }
+    if_->R.rsi = rsp;
     rsp -= WORD_SIZE;
     if_->rsp = rsp;
     if_->R.rdi = argc;
-    if_->R.rsi = temp[0];
 }
