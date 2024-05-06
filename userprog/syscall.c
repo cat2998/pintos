@@ -3,6 +3,7 @@
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/loader.h"
+#include "threads/palloc.h"
 #include "threads/thread.h"
 #include "userprog/gdt.h"
 #include <stdio.h>
@@ -51,6 +52,7 @@ void syscall_handler(struct intr_frame *f UNUSED) {
     case SYS_FORK:
         break; /* Clone current process. */
     case SYS_EXEC:
+        f->R.rax = exec(f->R.rdi);
         break; /* Switch current process. */
     case SYS_WAIT:
         break; /* Wait for a child process to die. */
@@ -79,23 +81,33 @@ void syscall_handler(struct intr_frame *f UNUSED) {
     default:
         break;
     }
-    // printf("system call!\n");
-    // thread_exit();
 }
 
 void check_addr(uint64_t *ptr) {
-    if (ptr == NULL || is_kernel_vaddr(ptr) || pml4_get_page(thread_current()->pml4, ptr))
+    if (ptr == NULL || is_kernel_vaddr(ptr) || !pml4_get_page(thread_current()->pml4, ptr))
         exit(-1);
 }
 
-// void halt(void) NO_RETURN;
 void exit(int status) {
     thread_current()->exit_status = status;
     printf("%s: exit(%d)\n", thread_current()->name, thread_current()->exit_status);
     thread_exit();
 }
+
+int exec(const char *file) {
+    char *fn_copy;
+
+    check_addr(file);
+    fn_copy = palloc_get_page(PAL_ZERO);
+    if (fn_copy == NULL)
+        return TID_ERROR;
+
+    strlcpy(fn_copy, file, strlen(file) + 1);
+    if (process_exec(fn_copy) < 0)
+        exit(-1);
+}
+
 // pid_t fork(const char *thread_name);
-// int exec(const char *file);
 // int wait(pid_t);
 // bool create(const char *file, unsigned initial_size);
 // bool remove(const char *file);

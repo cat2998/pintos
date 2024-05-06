@@ -202,7 +202,7 @@ int process_wait(tid_t child_tid UNUSED) {
     /* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
      * XXX:       to add infinite loop here before
      * XXX:       implementing the process_wait. */
-    thread_sleep(0);
+    thread_sleep(150);
     return -1;
 }
 
@@ -667,5 +667,4 @@ void setup_user_stack(struct intr_frame *if_, uint64_t argc, char *argv[]) {
     if_->rsp = rsp;
     // hex_dump(if_->rsp, if_->rsp, acc_l, true);
     if_->R.rdi = argc;
-    // printf("%d %p\n", if_->R.rdi, if_->R.rsi);
 }
