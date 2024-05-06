@@ -1,4 +1,5 @@
 #include "userprog/syscall.h"
+#include "filesys/filesys.h"
 #include "intrinsic.h"
 #include "threads/flags.h"
 #include "threads/interrupt.h"
@@ -6,6 +7,7 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "userprog/gdt.h"
+#include "userprog/process.h"
 #include <stdio.h>
 #include <syscall-nr.h>
 
@@ -61,6 +63,7 @@ void syscall_handler(struct intr_frame *f UNUSED) {
     case SYS_REMOVE:
         break; /* Delete a file. */
     case SYS_OPEN:
+        f->R.rax = open(f->R.rdi);
         break; /* Open a file. */
     case SYS_FILESIZE:
         break; /* Obtain a file's size. */
@@ -74,10 +77,8 @@ void syscall_handler(struct intr_frame *f UNUSED) {
     case SYS_TELL:
         break; /* Report current position in a file. */
     case SYS_CLOSE:
-        break; /* Close a file. */
-        /* code */
+        close(f->R.rdi);
         break;
-
     default:
         break;
     }
@@ -107,14 +108,48 @@ int exec(const char *file) {
         exit(-1);
 }
 
+int open(const char *file) {
+    struct thread *curr = thread_current();
+    struct file_descriptor *fd;
+    struct file *openfile;
+
+    check_addr(file);
+
+    fd = palloc_get_page(PAL_ZERO);
+    if (fd == NULL)
+        return TID_ERROR;
+
+    openfile = filesys_open(file);
+    if (!openfile)
+        return -1;
+
+    fd->fd = curr->fd_count;
+    fd->file = openfile;
+    list_push_back(&curr->fd_list, &fd->elem);
+
+    return curr->fd_count++;
+}
+void close(int fd) {
+    struct thread *curr = thread_current();
+    struct file_descriptor *t;
+    struct list_elem *e;
+    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list);e = list_next(e)) {
+        t = list_entry(e, struct file_descriptor, elem);
+        if (t->fd==fd) {
+            e = list_remove(e);
+            break;
+        }
+    }
+    palloc_free_page(t);
+}
+
 // pid_t fork(const char *thread_name);
 // int wait(pid_t);
 // bool create(const char *file, unsigned initial_size);
 // bool remove(const char *file);
-// int open(const char *file);
+
 // int filesize(int fd);
 // int read(int fd, void *buffer, unsigned length);
 // int write(int fd, const void *buffer, unsigned length);
 // void seek(int fd, unsigned position);
 // unsigned tell(int fd);
-// void close(int fd);
