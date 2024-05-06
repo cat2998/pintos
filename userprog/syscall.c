@@ -94,9 +94,11 @@ void syscall_handler(struct intr_frame *f UNUSED) {
         f->R.rax = filesize(f->R.rdi);
         break; /* Obtain a file's size. */
     case SYS_READ:
+        f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
         break; /* Read from a file. */
     case SYS_WRITE:
-        printf("%s", f->R.rsi);
+        // printf("%s", f->R.rsi);
+        f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
         break; /* Write to a file. */
     case SYS_SEEK:
         seek(f->R.rdi, f->R.rsi);
@@ -159,6 +161,7 @@ int open(const char *file) {
 
     return curr->fd_count++;
 }
+
 void close(int fd) {
     struct thread *curr = thread_current();
     struct file_descriptor *t;
@@ -251,5 +254,61 @@ int filesize(int fd) {
             break;
         }
     }
+    return result;
+}
+
+int read(int fd, void *buffer, unsigned length) {
+    struct thread *curr = thread_current();
+    struct file_descriptor *t;
+    struct list_elem *e;
+    off_t result;
+    bool is_find = false;
+
+    check_addr(buffer);
+
+    // if (fd == 0) { * 표준입력일때 devices/input_getc(void) 함수 사용
+    // }
+
+    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
+        t = list_entry(e, struct file_descriptor, elem);
+        if (t->fd == fd) {
+            is_find = true;
+            lock_acquire(&file_lock);
+            result = file_read(t->file, buffer, length);
+            lock_release(&file_lock);
+            break;
+        }
+    }
+    if (!is_find)
+        result = -1;
+    return result;
+}
+
+int write(int fd, const void *buffer, unsigned length) {
+    struct thread *curr = thread_current();
+    struct file_descriptor *t;
+    struct list_elem *e;
+    off_t result;
+    bool is_find = false;
+
+    check_addr(buffer);
+
+    if (fd == 1) {
+        putbuf(buffer, length);
+        return length;
+    }
+
+    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
+        t = list_entry(e, struct file_descriptor, elem);
+        if (t->fd == fd) {
+            is_find = true;
+            lock_acquire(&file_lock);
+            result = file_write(t->file, buffer, length);
+            lock_release(&file_lock);
+            break;
+        }
+    }
+    if (!is_find)
+        result = 0;
     return result;
 }
