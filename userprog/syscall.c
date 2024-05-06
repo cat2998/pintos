@@ -15,6 +15,23 @@
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
 
+void halt(void) NO_RETURN;
+void exit(int status) NO_RETURN;
+// pid_t fork(const char *thread_name);
+int exec(const char *file);
+int wait(pid_t);
+bool create(const char *file, unsigned initial_size);
+bool remove(const char *file);
+int open(const char *file);
+int filesize(int fd);
+int read(int fd, void *buffer, unsigned length);
+int write(int fd, const void *buffer, unsigned length);
+void seek(int fd, unsigned position);
+unsigned tell(int fd);
+void close(int fd);
+
+int dup2(int oldfd, int newfd);
+
 /* lock for access file_sys code */
 static struct lock file_lock;
 
@@ -64,8 +81,10 @@ void syscall_handler(struct intr_frame *f UNUSED) {
     case SYS_WAIT:
         break; /* Wait for a child process to die. */
     case SYS_CREATE:
+        f->R.rax = create(f->R.rdi, f->R.rsi);
         break; /* Create a file. */
     case SYS_REMOVE:
+        f->R.rax = remove(f->R.rdi);
         break; /* Delete a file. */
     case SYS_OPEN:
         f->R.rax = open(f->R.rdi);
@@ -159,13 +178,22 @@ void close(int fd) {
     }
 }
 
-// pid_t fork(const char *thread_name);
-// int wait(pid_t);
-// bool create(const char *file, unsigned initial_size);
-// bool remove(const char *file);
+bool create(const char *file, unsigned initial_size) {
+    bool success = false;
+    check_addr(file);
+    lock_acquire(&file_lock);
+    success = filesys_create(file, initial_size);
+    lock_release(&file_lock);
 
-// int filesize(int fd);
-// int read(int fd, void *buffer, unsigned length);
-// int write(int fd, const void *buffer, unsigned length);
-// void seek(int fd, unsigned position);
-// unsigned tell(int fd);
+    return success;
+}
+
+bool remove(const char *file) {
+    bool success = false;
+    check_addr(file);
+    lock_acquire(&file_lock);
+    success = filesys_remove(file);
+    lock_release(&file_lock);
+
+    return success;
+}
