@@ -653,13 +653,18 @@ void setup_user_stack(struct intr_frame *if_, uint64_t argc, char *argv[]) {
         memcpy(rsp, argv[i], l);
     }
     rsp -= WORD_SIZE - (acc_l % WORD_SIZE); // padding
-    rsp -= WORD_SIZE;                       // NULL pointer boundary
+    acc_l += WORD_SIZE - (acc_l % WORD_SIZE);
+    rsp -= WORD_SIZE;   // NULL pointer boundary
+    acc_l += WORD_SIZE; // NULL pointer boundary
     for (int i = argc - 1; i >= 0; i--) {
         rsp -= WORD_SIZE;
+        acc_l += WORD_SIZE;
         memcpy(rsp, &temp[i], WORD_SIZE);
     }
     if_->R.rsi = rsp;
     rsp -= WORD_SIZE;
+    acc_l += WORD_SIZE;
     if_->rsp = rsp;
+    // hex_dump(if_->rsp, if_->rsp, acc_l, true);
     if_->R.rdi = argc;
 }

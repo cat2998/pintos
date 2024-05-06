@@ -36,7 +36,7 @@ void syscall_init(void) {
     write_msr(MSR_SYSCALL_MASK,
               FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
-
+// halt exit check_addr wait exec fork create remove filesize open close read write
 /* The main system call interface */
 void syscall_handler(struct intr_frame *f UNUSED) {
     uint64_t syscall_num = f->R.rax;

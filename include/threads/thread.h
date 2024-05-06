@@ -96,7 +96,7 @@ struct thread {
 
     struct list donations;     /* 기부해준 스레드 리스트 */
     struct lock *wait_on_lock; /* 내가 기다리는 lock */
-        
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;   /* List element. */
     struct list_elem d_elem; /* donations element*/
