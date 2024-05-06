@@ -5,6 +5,7 @@
 #include "threads/interrupt.h"
 #include "threads/loader.h"
 #include "threads/palloc.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
 #include "userprog/gdt.h"
 #include "userprog/process.h"
@@ -13,6 +14,9 @@
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
+
+/* lock for access file_sys code */
+static struct lock file_lock;
 
 /* System call.
  *
@@ -37,6 +41,7 @@ void syscall_init(void) {
      * mode stack. Therefore, we masked the FLAG_FL. */
     write_msr(MSR_SYSCALL_MASK,
               FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+    lock_init(&file_lock);
 }
 // halt exit check_addr wait exec fork create remove filesize open close read write
 /* The main system call interface */
@@ -119,7 +124,9 @@ int open(const char *file) {
     if (fd == NULL)
         return TID_ERROR;
 
+    lock_acquire(&file_lock);
     openfile = filesys_open(file);
+    lock_release(&file_lock);
     if (!openfile)
         return -1;
 
@@ -133,14 +140,23 @@ void close(int fd) {
     struct thread *curr = thread_current();
     struct file_descriptor *t;
     struct list_elem *e;
-    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list);e = list_next(e)) {
+    bool is_find = false;
+
+    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
         t = list_entry(e, struct file_descriptor, elem);
-        if (t->fd==fd) {
+        if (t->fd == fd) {
+            is_find = true;
             e = list_remove(e);
             break;
         }
     }
-    palloc_free_page(t);
+
+    if (is_find) {
+        lock_acquire(&file_lock);
+        file_close(t->file);
+        lock_release(&file_lock);
+        palloc_free_page(t);
+    }
 }
 
 // pid_t fork(const char *thread_name);
