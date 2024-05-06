@@ -1,4 +1,5 @@
 #include "userprog/syscall.h"
+#include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "intrinsic.h"
 #include "threads/flags.h"
@@ -90,6 +91,7 @@ void syscall_handler(struct intr_frame *f UNUSED) {
         f->R.rax = open(f->R.rdi);
         break; /* Open a file. */
     case SYS_FILESIZE:
+        f->R.rax = filesize(f->R.rdi);
         break; /* Obtain a file's size. */
     case SYS_READ:
         break; /* Read from a file. */
@@ -97,8 +99,10 @@ void syscall_handler(struct intr_frame *f UNUSED) {
         printf("%s", f->R.rsi);
         break; /* Write to a file. */
     case SYS_SEEK:
+        seek(f->R.rdi, f->R.rsi);
         break; /* Change position in a file. */
     case SYS_TELL:
+        f->R.rax = tell(f->R.rdi);
         break; /* Report current position in a file. */
     case SYS_CLOSE:
         close(f->R.rdi);
@@ -196,4 +200,56 @@ bool remove(const char *file) {
     lock_release(&file_lock);
 
     return success;
+}
+
+void seek(int fd, unsigned position) {
+    struct thread *curr = thread_current();
+    struct file_descriptor *t;
+    struct list_elem *e;
+
+    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
+        t = list_entry(e, struct file_descriptor, elem);
+        if (t->fd == fd) {
+            lock_acquire(&file_lock);
+            file_seek(t->file, position);
+            lock_release(&file_lock);
+            break;
+        }
+    }
+}
+
+unsigned tell(int fd) {
+    struct thread *curr = thread_current();
+    struct file_descriptor *t;
+    struct list_elem *e;
+    unsigned result;
+
+    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
+        t = list_entry(e, struct file_descriptor, elem);
+        if (t->fd == fd) {
+            lock_acquire(&file_lock);
+            result = file_tell(t->file);
+            lock_release(&file_lock);
+            break;
+        }
+    }
+    return result;
+}
+
+int filesize(int fd) {
+    struct thread *curr = thread_current();
+    struct file_descriptor *t;
+    struct list_elem *e;
+    unsigned result;
+
+    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
+        t = list_entry(e, struct file_descriptor, elem);
+        if (t->fd == fd) {
+            lock_acquire(&file_lock);
+            result = file_length(t->file);
+            lock_release(&file_lock);
+            break;
+        }
+    }
+    return result;
 }
