@@ -93,9 +93,11 @@ struct thread {
     int priority;              /* Priority. */
     int origin_priority;       /* origin Priority*/
     int64_t wake_tick;         /* 일어날 시간 */
+    int fd_count;              /* file descriptor count */
 
     struct list donations;     /* 기부해준 스레드 리스트 */
     struct lock *wait_on_lock; /* 내가 기다리는 lock */
+    struct list fd_list;       /* file descriptor list*/
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;   /* List element. */

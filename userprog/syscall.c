@@ -1,16 +1,22 @@
 #include "userprog/syscall.h"
+#include "filesys/filesys.h"
 #include "intrinsic.h"
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/loader.h"
 #include "threads/palloc.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
 #include "userprog/gdt.h"
+#include "userprog/process.h"
 #include <stdio.h>
 #include <syscall-nr.h>
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
+
+/* lock for access file_sys code */
+static struct lock file_lock;
 
 /* System call.
  *
@@ -35,6 +41,7 @@ void syscall_init(void) {
      * mode stack. Therefore, we masked the FLAG_FL. */
     write_msr(MSR_SYSCALL_MASK,
               FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+    lock_init(&file_lock);
 }
 // halt exit check_addr wait exec fork create remove filesize open close read write
 /* The main system call interface */
@@ -61,6 +68,7 @@ void syscall_handler(struct intr_frame *f UNUSED) {
     case SYS_REMOVE:
         break; /* Delete a file. */
     case SYS_OPEN:
+        f->R.rax = open(f->R.rdi);
         break; /* Open a file. */
     case SYS_FILESIZE:
         break; /* Obtain a file's size. */
@@ -74,10 +82,8 @@ void syscall_handler(struct intr_frame *f UNUSED) {
     case SYS_TELL:
         break; /* Report current position in a file. */
     case SYS_CLOSE:
-        break; /* Close a file. */
-        /* code */
+        close(f->R.rdi);
         break;
-
     default:
         break;
     }
@@ -107,14 +113,59 @@ int exec(const char *file) {
         exit(-1);
 }
 
+int open(const char *file) {
+    struct thread *curr = thread_current();
+    struct file_descriptor *fd;
+    struct file *openfile;
+
+    check_addr(file);
+
+    fd = palloc_get_page(PAL_ZERO);
+    if (fd == NULL)
+        return TID_ERROR;
+
+    lock_acquire(&file_lock);
+    openfile = filesys_open(file);
+    lock_release(&file_lock);
+    if (!openfile)
+        return -1;
+
+    fd->fd = curr->fd_count;
+    fd->file = openfile;
+    list_push_back(&curr->fd_list, &fd->elem);
+
+    return curr->fd_count++;
+}
+void close(int fd) {
+    struct thread *curr = thread_current();
+    struct file_descriptor *t;
+    struct list_elem *e;
+    bool is_find = false;
+
+    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
+        t = list_entry(e, struct file_descriptor, elem);
+        if (t->fd == fd) {
+            is_find = true;
+            e = list_remove(e);
+            break;
+        }
+    }
+
+    if (is_find) {
+        lock_acquire(&file_lock);
+        file_close(t->file);
+        lock_release(&file_lock);
+        palloc_free_page(t);
+    }
+}
+
 // pid_t fork(const char *thread_name);
 // int wait(pid_t);
 // bool create(const char *file, unsigned initial_size);
 // bool remove(const char *file);
-// int open(const char *file);
+
 // int filesize(int fd);
 // int read(int fd, void *buffer, unsigned length);
 // int write(int fd, const void *buffer, unsigned length);
 // void seek(int fd, unsigned position);
 // unsigned tell(int fd);
-// void close(int fd);
