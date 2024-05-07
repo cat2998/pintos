@@ -18,7 +18,7 @@ void syscall_handler(struct intr_frame *);
 
 void halt(void) NO_RETURN;
 void exit(int status) NO_RETURN;
-// pid_t fork(const char *thread_name);
+pid_t fork(const char *thread_name, struct intr_frame *f);
 int exec(const char *file);
 int wait(pid_t);
 bool create(const char *file, unsigned initial_size);
@@ -34,7 +34,7 @@ void close(int fd);
 int dup2(int oldfd, int newfd);
 
 /* lock for access file_sys code */
-static struct lock file_lock;
+struct lock file_lock;
 
 /* System call.
  *
@@ -75,6 +75,7 @@ void syscall_handler(struct intr_frame *f UNUSED) {
         exit(f->R.rdi);
         break;
     case SYS_FORK:
+        f->R.rax = fork(f->R.rdi, f->R.rsi);
         break; /* Clone current process. */
     case SYS_EXEC:
         f->R.rax = exec(f->R.rdi);
@@ -313,4 +314,13 @@ int write(int fd, const void *buffer, unsigned length) {
     if (!is_find)
         result = 0;
     return result;
+}
+
+pid_t fork(const char *thread_name, struct intr_frame *f) {
+    pid_t child_pid;
+    struct thread *curr = thread_current();
+    memcpy(curr->if_, f, sizeof(struct intr_frame));
+    child_pid = process_fork(thread_name, f);
+    semadown(curr->fork_sema);
+    return child_pid;
 }
