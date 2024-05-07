@@ -152,8 +152,10 @@ int open(const char *file) {
     lock_acquire(&file_lock);
     openfile = filesys_open(file);
     lock_release(&file_lock);
-    if (!openfile)
+    if (!openfile) {
+        palloc_free_page(fd);
         return -1;
+    }
 
     fd->fd = curr->fd_count;
     fd->file = openfile;
