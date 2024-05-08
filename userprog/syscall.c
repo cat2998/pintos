@@ -2,6 +2,7 @@
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "intrinsic.h"
+#include "lib/string.h"
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/loader.h"
@@ -320,8 +321,8 @@ pid_t fork(const char *thread_name, struct intr_frame *f) {
     pid_t child_pid;
     struct thread *curr = thread_current();
 
-    memcpy(curr->if_, f, sizeof(struct intr_frame));
+    memcpy(&curr->if_, f, sizeof(struct intr_frame));
     child_pid = process_fork(thread_name, f);
-    semadown(curr->fork_sema);
+    sema_down(&curr->fork_sema);
     return child_pid;
 }
