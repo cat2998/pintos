@@ -75,7 +75,7 @@ void syscall_handler(struct intr_frame *f UNUSED) {
         exit(f->R.rdi);
         break;
     case SYS_FORK:
-        f->R.rax = fork(f->R.rdi, f->R.rsi);
+        f->R.rax = fork(f->R.rdi, f);
         break; /* Clone current process. */
     case SYS_EXEC:
         f->R.rax = exec(f->R.rdi);
@@ -319,6 +319,7 @@ int write(int fd, const void *buffer, unsigned length) {
 pid_t fork(const char *thread_name, struct intr_frame *f) {
     pid_t child_pid;
     struct thread *curr = thread_current();
+
     memcpy(curr->if_, f, sizeof(struct intr_frame));
     child_pid = process_fork(thread_name, f);
     semadown(curr->fork_sema);

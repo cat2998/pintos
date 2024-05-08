@@ -128,11 +128,12 @@ __do_fork(void *aux) {
     struct thread *parent = (struct thread *)aux;
     struct thread *current = thread_current();
     /* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-    struct intr_frame *parent_if = &parent->tf;
+    struct intr_frame *parent_if = &parent->if_;
     bool succ = true;
-    struct file_descriptor *t;
     struct list_elem *e;
+    struct file_descriptor *t;
     struct file_descriptor *n_fd;
+
     /* 1. Read the cpu context to local stack. */
     memcpy(&if_, parent_if, sizeof(struct intr_frame));
     if_.R.rax = 0;

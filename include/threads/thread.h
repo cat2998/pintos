@@ -116,9 +116,9 @@ struct thread {
 #endif
 
     /* Owned by thread.c. */
-    struct intr_frame tf; /* Information for switching */
-    struct intr_frame if_;
-    unsigned magic; /* Detects stack overflow. */
+    struct intr_frame tf;  /* Information for switching */
+    struct intr_frame if_; /* Information for fork */
+    unsigned magic;        /* Detects stack overflow. */
 };
 
 /* If false (default), use round-robin scheduler.
