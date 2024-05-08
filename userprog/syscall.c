@@ -21,7 +21,7 @@ void halt(void) NO_RETURN;
 void exit(int status) NO_RETURN;
 pid_t fork(const char *thread_name, struct intr_frame *f);
 int exec(const char *file);
-int wait(pid_t);
+int wait(pid_t pid);
 bool create(const char *file, unsigned initial_size);
 bool remove(const char *file);
 int open(const char *file);
@@ -82,6 +82,7 @@ void syscall_handler(struct intr_frame *f UNUSED) {
         f->R.rax = exec(f->R.rdi);
         break; /* Switch current process. */
     case SYS_WAIT:
+        f->R.rax = wait(f->R.rdi);
         break; /* Wait for a child process to die. */
     case SYS_CREATE:
         f->R.rax = create(f->R.rdi, f->R.rsi);
@@ -324,5 +325,11 @@ pid_t fork(const char *thread_name, struct intr_frame *f) {
     memcpy(&curr->if_, f, sizeof(struct intr_frame));
     child_pid = process_fork(thread_name, f);
     sema_down(&curr->fork_sema);
+    return child_pid;
+}
+
+int wait(pid_t pid) {
+    pid_t child_pid;
+    child_pid = process_wait(pid);
     return child_pid;
 }
