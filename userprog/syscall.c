@@ -101,7 +101,6 @@ void syscall_handler(struct intr_frame *f UNUSED) {
         f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
         break; /* Read from a file. */
     case SYS_WRITE:
-        // printf("%s", f->R.rsi);
         f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
         break; /* Write to a file. */
     case SYS_SEEK:
@@ -133,6 +132,7 @@ int exec(const char *file) {
     char *fn_copy;
 
     check_addr(file);
+
     fn_copy = palloc_get_page(PAL_ZERO);
     if (fn_copy == NULL)
         return TID_ERROR;
@@ -322,15 +322,28 @@ int write(int fd, const void *buffer, unsigned length) {
 pid_t fork(const char *thread_name, struct intr_frame *f) {
     pid_t child_pid;
     struct thread *curr = thread_current();
+    struct list_elem *e;
+    struct thread *child;
+
+    check_addr(thread_name);
 
     memcpy(&curr->if_, f, sizeof(struct intr_frame));
     child_pid = process_fork(thread_name, f);
+
+    for (e = list_begin(&curr->child_list); e != list_end(&curr->child_list); e = list_next(e)) {
+        child = list_entry(e, struct thread, c_elem);
+        if (child->tid == child_pid) {
+            break;
+        }
+    }
     sema_down(&curr->fork_sema);
+    child_pid = child->tid;
     return child_pid;
 }
 
 int wait(pid_t pid) {
     pid_t child_pid;
+
     child_pid = process_wait(pid);
     return child_pid;
 }

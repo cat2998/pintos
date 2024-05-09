@@ -115,6 +115,7 @@ duplicate_pte(uint64_t *pte, void *va, void *aux) {
      *    permission. */
     if (!pml4_set_page(current->pml4, va, newpage, writable)) {
         /* 6. TODO: if fail to insert page, do error handling. */
+        palloc_free_page(newpage);
         return false;
     }
     return true;
@@ -188,6 +189,7 @@ __do_fork(void *aux) {
     }
 
 error:
+    current->tid = TID_ERROR;
     sema_up(&parent->fork_sema);
     exit(TID_ERROR);
 }
