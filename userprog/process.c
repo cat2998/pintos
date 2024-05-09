@@ -95,18 +95,20 @@ duplicate_pte(uint64_t *pte, void *va, void *aux) {
 
     /* 1. TODO: If the parent_page is kernel page, then return immediately. */
     if (is_kern_pte(pte))
-        return false;
+        return true;
     /* 2. Resolve VA from the parent's page map level 4. */
     parent_page = pml4_get_page(parent->pml4, va);
 
     /* 3. TODO: Allocate new PAL_USER page for the child and set result to
      *    TODO: NEWPAGE. */
     newpage = palloc_get_page(PAL_USER);
+    if (newpage == NULL)
+        return false;
 
     /* 4. TODO: Duplicate parent's page to the new page and
      *    TODO: check whether parent's page is writable or not (set WRITABLE
      *    TODO: according to the result). */
-    memcpy(newpage, parent_page, 4096);
+    memcpy(newpage, parent_page, PGSIZE);
     writable = is_writable(pte);
     /* 5. Add new page to child's page table at address VA with WRITABLE
      *    permission. */
@@ -137,6 +139,7 @@ __do_fork(void *aux) {
     /* 1. Read the cpu context to local stack. */
     memcpy(&if_, parent_if, sizeof(struct intr_frame));
     if_.R.rax = 0;
+
     /* 2. Duplicate PT */
     current->pml4 = pml4_create();
     if (current->pml4 == NULL)
@@ -171,6 +174,7 @@ __do_fork(void *aux) {
         }
         list_push_back(&current->fd_list, &n_fd->elem);
     }
+    current->fd_count = parent->fd_count;
 
     process_init();
 
@@ -225,22 +229,50 @@ int process_exec(void *f_name) {
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
 int process_wait(tid_t child_tid UNUSED) {
-    /* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
-     * XXX:       to add infinite loop here before
-     * XXX:       implementing the process_wait. */
-    thread_sleep(150);
+    struct thread *current = thread_current();
+    struct list_elem *e;
+    struct thread *child;
+    int exit_status;
+
+    for (e = list_begin(&current->child_list); e != list_end(&current->child_list); e = list_next(e)) {
+        child = list_entry(e, struct thread, c_elem);
+        if (child->tid == child_tid) {
+            sema_down(&child->wait_sema);
+            exit_status = child->exit_status;
+            list_remove(e);
+            sema_up(&child->exit_sema);
+            return exit_status;
+        }
+    }
+
     return -1;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
 void process_exit(void) {
     struct thread *curr = thread_current();
+    struct list_elem *e;
+    struct thread *child;
+    int exit_status;
     /* TODO: Your code goes here.
      * TODO: Implement process termination message (see
      * TODO: project2/process_termination.html).
      * TODO: We recommend you to implement process resource cleanup here. */
 
     process_cleanup();
+    if (curr->tid != 1 && curr->exec_file != NULL) {
+        file_close(curr->exec_file);
+    }
+
+    if (!list_empty(&curr->child_list)) {
+        for (e = list_begin(&curr->child_list); e != list_end(&curr->child_list); e = list_next(e)) {
+            child = list_entry(e, struct thread, c_elem);
+            sema_up(&child->exit_sema);
+        }
+    }
+
+    sema_up(&curr->wait_sema);
+    sema_down(&curr->exit_sema);
 }
 
 /* Free the current process's resources. */
@@ -363,11 +395,14 @@ load(const char *file_name, struct intr_frame *if_) {
     process_activate(thread_current());
 
     /* Open executable file. */
+    lock_acquire(&file_lock);
     file = filesys_open(file_name);
+    lock_release(&file_lock);
     if (file == NULL) {
         printf("load: %s: open failed\n", file_name);
         goto done;
     }
+    file_deny_write(file);
 
     /* Read and verify executable header. */
     if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr || memcmp(ehdr.e_ident, "\177ELF\2\1\1", 7) || ehdr.e_type != 2 || ehdr.e_machine != 0x3E // amd64
@@ -442,6 +477,10 @@ load(const char *file_name, struct intr_frame *if_) {
 
 done:
     /* We arrive here whether the load is successful or not. */
+    if (success) {
+        t->exec_file = file;
+        return success;
+    }
     file_close(file);
     return success;
 }

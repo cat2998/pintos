@@ -1,11 +1,12 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
 
+#include "filesys/file.h"
 #include "threads/interrupt.h"
+#include "threads/synch.h"
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
-#include "threads/synch.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -107,6 +108,10 @@ struct thread {
     struct list_elem c_elem; /* child_list element*/
 
     struct semaphore fork_sema; /* semaphore for fork*/
+    struct semaphore wait_sema; /* semaphore for wait*/
+    struct semaphore exit_sema; /* semaphore for exit*/
+
+    struct file *exec_file;
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint64_t *pml4; /* Page map level 4 */
