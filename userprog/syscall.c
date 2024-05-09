@@ -6,6 +6,7 @@
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/loader.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
@@ -148,7 +149,7 @@ int open(const char *file) {
 
     check_addr(file);
 
-    fd = palloc_get_page(PAL_ZERO);
+    fd = calloc(1, sizeof *fd);
     if (fd == NULL)
         return TID_ERROR;
 
@@ -156,7 +157,7 @@ int open(const char *file) {
     openfile = filesys_open(file);
     lock_release(&file_lock);
     if (!openfile) {
-        palloc_free_page(fd);
+        free(fd);
         return -1;
     }
 
@@ -186,7 +187,7 @@ void close(int fd) {
         lock_acquire(&file_lock);
         file_close(t->file);
         lock_release(&file_lock);
-        palloc_free_page(t);
+        free(t);
     }
 }
 

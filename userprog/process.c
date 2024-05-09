@@ -6,6 +6,7 @@
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/mmu.h"
 #include "threads/palloc.h"
 #include "threads/synch.h"
@@ -163,13 +164,15 @@ __do_fork(void *aux) {
 
     for (e = list_begin(&parent->fd_list); e != list_end(&parent->fd_list); e = list_next(e)) {
         t = list_entry(e, struct file_descriptor, elem);
-        n_fd = palloc_get_page(0);
+        n_fd = calloc(1, sizeof *n_fd);
+        if (n_fd == NULL)
+            goto error;
         n_fd->fd = t->fd;
         lock_acquire(&file_lock);
         n_fd->file = file_duplicate(t->file);
         lock_release(&file_lock);
         if (n_fd->file == NULL) {
-            palloc_free_page(n_fd);
+            free(n_fd);
             goto error;
         }
         list_push_back(&current->fd_list, &n_fd->elem);
@@ -253,6 +256,7 @@ void process_exit(void) {
     struct thread *curr = thread_current();
     struct list_elem *e;
     struct thread *child;
+    struct file_descriptor *fd;
     int exit_status;
     /* TODO: Your code goes here.
      * TODO: Implement process termination message (see
@@ -260,8 +264,14 @@ void process_exit(void) {
      * TODO: We recommend you to implement process resource cleanup here. */
 
     process_cleanup();
-    if (curr->tid != 1 && curr->exec_file != NULL) {
-        file_close(curr->exec_file);
+
+    if (!list_empty(&curr->fd_list)) {
+        for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list);) {
+            fd = list_entry(e, struct file_descriptor, elem);
+            e = list_remove(e);
+            file_close(fd->file);
+            free(fd);
+        }
     }
 
     if (!list_empty(&curr->child_list)) {
@@ -279,6 +289,11 @@ void process_exit(void) {
 static void
 process_cleanup(void) {
     struct thread *curr = thread_current();
+
+    if (curr->exec_file != NULL) {
+        file_close(curr->exec_file);
+        curr->exec_file = NULL;
+    }
 
 #ifdef VM
     supplemental_page_table_kill(&curr->spt);
@@ -718,18 +733,13 @@ void setup_user_stack(struct intr_frame *if_, uint64_t argc, char *argv[]) {
         memcpy(rsp, argv[i], l);
     }
     rsp -= WORD_SIZE - (acc_l % WORD_SIZE); // padding
-    acc_l += WORD_SIZE - (acc_l % WORD_SIZE);
-    rsp -= WORD_SIZE;   // NULL pointer boundary
-    acc_l += WORD_SIZE; // NULL pointer boundary
+    rsp -= WORD_SIZE;                       // NULL pointer boundary
     for (int i = argc - 1; i >= 0; i--) {
         rsp -= WORD_SIZE;
-        acc_l += WORD_SIZE;
         memcpy(rsp, &temp[i], WORD_SIZE);
     }
     if_->R.rsi = rsp;
     rsp -= WORD_SIZE;
-    acc_l += WORD_SIZE;
     if_->rsp = rsp;
-    // hex_dump(if_->rsp, if_->rsp, acc_l, true);
     if_->R.rdi = argc;
 }
