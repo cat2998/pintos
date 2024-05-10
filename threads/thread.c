@@ -184,6 +184,7 @@ tid_t thread_create(const char *name, int priority, thread_func *function, void 
 
     /* Allocate thread. */
     t = palloc_get_page(PAL_ZERO);
+    // t = palloc_get_multiple(PAL_ZERO, 100);
     if (t == NULL)
         return TID_ERROR;
 
@@ -591,6 +592,7 @@ do_schedule(int status) {
         struct thread *victim =
             list_entry(list_pop_front(&destruction_req), struct thread, elem);
         palloc_free_page(victim);
+        // palloc_free_multiple(victim, 100);
     }
     thread_current()->status = status;
     schedule();

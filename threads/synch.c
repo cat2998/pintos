@@ -185,7 +185,7 @@ void lock_acquire(struct lock *lock) {
     if (lock->holder) {
         curr->wait_on_lock = lock;
         list_insert_ordered(&lock->holder->donations, &thread_current()->d_elem, compare_priority, NULL);
-        while (curr && lock_t) {
+        while (curr && lock_t && lock_t->holder) {
             donate_priority(lock_t, curr);
             if (!curr->wait_on_lock)
                 break;
