@@ -167,7 +167,7 @@ __do_fork(void *aux) {
 
     for (e = list_begin(&parent->fd_list); e != list_end(&parent->fd_list); e = list_next(e)) {
         t = list_entry(e, struct file_descriptor, elem);
-        
+
         n_fd = calloc(1, sizeof *n_fd);
         if (n_fd == NULL)
             goto error;
@@ -178,15 +178,18 @@ __do_fork(void *aux) {
             goto error;
         }
 
-        lock_acquire(&file_lock);
-        n_fd->file_wrapper->file = file_duplicate(t->file_wrapper->file);
-        lock_release(&file_lock);
-        if (n_fd->file_wrapper->file == NULL) {
-            free(n_fd->file_wrapper);
-            free(n_fd);
-            goto error;
-        }
-        
+        if (t->file_wrapper->file) {
+            lock_acquire(&file_lock);
+            n_fd->file_wrapper->file = file_duplicate(t->file_wrapper->file);
+            lock_release(&file_lock);
+            if (n_fd->file_wrapper->file == NULL) {
+                free(n_fd->file_wrapper);
+                free(n_fd);
+                goto error;
+            }
+        } else
+            memcpy(n_fd->file_wrapper, t->file_wrapper, sizeof *t->file_wrapper);
+
         n_fd->fd = t->fd;
         list_push_back(&current->fd_list, &n_fd->elem);
     }
@@ -226,6 +229,10 @@ int process_exec(void *f_name) {
     /* And then load the binary */
     success = load(file_name, &_if);
 
+    fd_list_init(0); // stdin
+    fd_list_init(1); // stdout
+    fd_list_init(2); // stderr
+
     /* If load failed, quit. */
     palloc_free_page(file_name);
     if (!success)
@@ -234,6 +241,34 @@ int process_exec(void *f_name) {
     /* Start switched process. */
     do_iret(&_if);
     NOT_REACHED();
+}
+
+void fd_list_init(int fd_n) {
+    struct file_descriptor *fd;
+    struct file_ *file_wrapper;
+    struct thread *t = thread_current();
+
+    fd = calloc(1, sizeof *fd);
+    if (fd == NULL)
+        return TID_ERROR;
+
+    file_wrapper = calloc(1, sizeof *file_wrapper);
+    if (file_wrapper == NULL) {
+        free(fd);
+        return TID_ERROR;
+    }
+
+    fd->fd = fd_n;
+    fd->file_wrapper = file_wrapper;
+    if (fd_n == 0)
+        file_wrapper->_stdin = true;
+    else if (fd_n == 1)
+        file_wrapper->_stdout = true;
+    else if (fd_n == 2)
+        file_wrapper->_stderr = true;
+    file_wrapper->file = NULL;
+
+    list_push_back(&t->fd_list, &fd->elem);
 }
 
 /* Waits for thread TID to die and returns its exit status.  If

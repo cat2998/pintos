@@ -151,7 +151,14 @@ int open(const char *file) {
     struct file_ *file_wrapper;
     struct file *openfile;
 
+    struct file_descriptor *t;
+    struct list_elem *e;
+    int is_find = false;
+
     check_addr(file);
+
+    if (list_size(&curr->fd_list) > 128)
+        return -1;
 
     fd = calloc(1, sizeof *fd);
     if (fd == NULL)
@@ -171,6 +178,18 @@ int open(const char *file) {
         free(fd);
         return -1;
     }
+
+    do {
+        is_find = false;
+        for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
+            t = list_entry(e, struct file_descriptor, elem);
+            if (t->fd == curr->fd_count) {
+                curr->fd_count++;
+                is_find = true;
+                break;
+            }
+        }
+    } while (is_find);
 
     fd->fd = curr->fd_count;
     fd->file_wrapper = file_wrapper;
@@ -234,7 +253,7 @@ void seek(int fd, unsigned position) {
 
     for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
         t = list_entry(e, struct file_descriptor, elem);
-        if (t->fd == fd) {
+        if (t->fd == fd && t->file_wrapper->file) {
             lock_acquire(&file_lock);
             file_seek(t->file_wrapper->file, position);
             lock_release(&file_lock);
@@ -288,16 +307,17 @@ int read(int fd, void *buffer, unsigned length) {
 
     check_addr(buffer);
 
-    // if (fd == 0) { * 표준입력일때 devices/input_getc(void) 함수 사용
-    // }
-
     for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
         t = list_entry(e, struct file_descriptor, elem);
         if (t->fd == fd) {
             is_find = true;
-            lock_acquire(&file_lock);
-            result = file_read(t->file_wrapper->file, buffer, length);
-            lock_release(&file_lock);
+            if (t->file_wrapper->_stdin)
+                return input_getc();
+            if (t->file_wrapper->file) {
+                lock_acquire(&file_lock);
+                result = file_read(t->file_wrapper->file, buffer, length);
+                lock_release(&file_lock);
+            }
             break;
         }
     }
@@ -315,18 +335,19 @@ int write(int fd, const void *buffer, unsigned length) {
 
     check_addr(buffer);
 
-    if (fd == 1) {
-        putbuf(buffer, length);
-        return length;
-    }
-
     for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
         t = list_entry(e, struct file_descriptor, elem);
         if (t->fd == fd) {
             is_find = true;
-            lock_acquire(&file_lock);
-            result = file_write(t->file_wrapper->file, buffer, length);
-            lock_release(&file_lock);
+            if (t->file_wrapper->_stdout) {
+                putbuf(buffer, length);
+                return length;
+            }
+            if (t->file_wrapper->file) {
+                lock_acquire(&file_lock);
+                result = file_write(t->file_wrapper->file, buffer, length);
+                lock_release(&file_lock);
+            }
             break;
         }
     }
