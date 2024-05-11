@@ -28,7 +28,9 @@ static void process_cleanup(void);
 static bool load(const char *file_name, struct intr_frame *if_);
 static void initd(void *f_name);
 static void __do_fork(void *);
+
 extern struct lock file_lock;
+
 /* General process initializer for initd and other process. */
 static void
 process_init(void) {
@@ -165,19 +167,27 @@ __do_fork(void *aux) {
 
     for (e = list_begin(&parent->fd_list); e != list_end(&parent->fd_list); e = list_next(e)) {
         t = list_entry(e, struct file_descriptor, elem);
+        
         n_fd = calloc(1, sizeof *n_fd);
-        n_fd->file_wrapper = calloc(1, sizeof *n_fd->file_wrapper);
         if (n_fd == NULL)
             goto error;
-        n_fd->fd = t->fd;
+
+        n_fd->file_wrapper = calloc(1, sizeof *n_fd->file_wrapper);
+        if (n_fd->file_wrapper == NULL) {
+            free(n_fd);
+            goto error;
+        }
+
         lock_acquire(&file_lock);
         n_fd->file_wrapper->file = file_duplicate(t->file_wrapper->file);
         lock_release(&file_lock);
         if (n_fd->file_wrapper->file == NULL) {
             free(n_fd->file_wrapper);
-                free(n_fd);
+            free(n_fd);
             goto error;
         }
+        
+        n_fd->fd = t->fd;
         list_push_back(&current->fd_list, &n_fd->elem);
     }
     current->fd_count = parent->fd_count;
@@ -274,11 +284,12 @@ void process_exit(void) {
             fd = list_entry(e, struct file_descriptor, elem);
             e = list_remove(e);
             if (fd->file_wrapper->dup_cnt == 0) {
+                lock_acquire(&file_lock);
                 file_close(fd->file_wrapper->file);
-            } else {
+                lock_release(&file_lock);
+                free(fd->file_wrapper);
+            } else
                 fd->file_wrapper->dup_cnt--;
-            }
-            free(fd->file_wrapper);
             free(fd);
         }
     }

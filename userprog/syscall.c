@@ -148,8 +148,8 @@ int exec(const char *file) {
 int open(const char *file) {
     struct thread *curr = thread_current();
     struct file_descriptor *fd;
-    struct file *openfile;
     struct file_ *file_wrapper;
+    struct file *openfile;
 
     check_addr(file);
 
@@ -157,16 +157,20 @@ int open(const char *file) {
     if (fd == NULL)
         return TID_ERROR;
 
+    file_wrapper = calloc(1, sizeof *file_wrapper);
+    if (file_wrapper == NULL) {
+        free(fd);
+        return TID_ERROR;
+    }
+
     lock_acquire(&file_lock);
     openfile = filesys_open(file);
     lock_release(&file_lock);
     if (!openfile) {
+        free(file_wrapper);
         free(fd);
         return -1;
     }
-    file_wrapper = calloc(1, sizeof *file_wrapper);
-    if (file_wrapper == NULL)
-        return TID_ERROR;
 
     fd->fd = curr->fd_count;
     fd->file_wrapper = file_wrapper;
@@ -196,10 +200,9 @@ void close(int fd) {
             lock_acquire(&file_lock);
             file_close(t->file_wrapper->file);
             lock_release(&file_lock);
-        } else {
+            free(t->file_wrapper);
+        } else
             t->file_wrapper->dup_cnt--;
-        }
-        free(t->file_wrapper);
         free(t);
     }
 }
@@ -381,29 +384,22 @@ int dup2(int oldfd, int newfd) {
         }
     }
 
-    if (!is_find_o) {
+    if (!is_find_o)
         return -1;
-    }
 
-    if (oldfd == newfd) {
+    if (oldfd == newfd)
         return newfd;
-    }
 
-    if (is_find_n) {
+    if (is_find_n)
         close(n_file_descriptor->fd);
-    }
 
     n_file_descriptor = malloc(sizeof *n_file_descriptor);
     if (n_file_descriptor == NULL) {
         return TID_ERROR;
     }
-    n_file_descriptor->file_wrapper = calloc(1, sizeof *n_file_descriptor->file_wrapper);
-    if (n_file_descriptor->file_wrapper == NULL) {
-        free(n_file_descriptor);
-        return TID_ERROR;
-    }
+
     n_file_descriptor->fd = newfd;
-    n_file_descriptor->file_wrapper->file = file_descriptor->file_wrapper->file;
+    n_file_descriptor->file_wrapper = o_file_descriptor->file_wrapper;
     n_file_descriptor->file_wrapper->dup_cnt++;
 
     list_push_back(&curr->fd_list, &n_file_descriptor->elem);
