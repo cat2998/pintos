@@ -7,8 +7,13 @@
 
 struct file_descriptor {
     int fd;
-    struct file *file;
+    struct file_ *file_wrapper;
     struct list_elem elem;
+};
+
+struct file_ {
+    int dup_cnt;
+    struct file *file;
 };
 
 tid_t process_create_initd(const char *file_name);

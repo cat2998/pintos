@@ -112,6 +112,9 @@ void syscall_handler(struct intr_frame *f UNUSED) {
     case SYS_CLOSE:
         close(f->R.rdi);
         break;
+    case SYS_DUP2:
+        f->R.rax = dup2(f->R.rdi, f->R.rsi);
+        break;
     default:
         break;
     }
@@ -146,6 +149,7 @@ int open(const char *file) {
     struct thread *curr = thread_current();
     struct file_descriptor *fd;
     struct file *openfile;
+    struct file_ *file_wrapper;
 
     check_addr(file);
 
@@ -160,9 +164,13 @@ int open(const char *file) {
         free(fd);
         return -1;
     }
+    file_wrapper = calloc(1, sizeof *file_wrapper);
+    if (file_wrapper == NULL)
+        return TID_ERROR;
 
     fd->fd = curr->fd_count;
-    fd->file = openfile;
+    fd->file_wrapper = file_wrapper;
+    fd->file_wrapper->file = openfile;
     list_push_back(&curr->fd_list, &fd->elem);
 
     return curr->fd_count++;
@@ -184,9 +192,14 @@ void close(int fd) {
     }
 
     if (is_find) {
-        lock_acquire(&file_lock);
-        file_close(t->file);
-        lock_release(&file_lock);
+        if (t->file_wrapper->dup_cnt == 0) {
+            lock_acquire(&file_lock);
+            file_close(t->file_wrapper->file);
+            lock_release(&file_lock);
+        } else {
+            t->file_wrapper->dup_cnt--;
+        }
+        free(t->file_wrapper);
         free(t);
     }
 }
@@ -220,7 +233,7 @@ void seek(int fd, unsigned position) {
         t = list_entry(e, struct file_descriptor, elem);
         if (t->fd == fd) {
             lock_acquire(&file_lock);
-            file_seek(t->file, position);
+            file_seek(t->file_wrapper->file, position);
             lock_release(&file_lock);
             break;
         }
@@ -237,7 +250,7 @@ unsigned tell(int fd) {
         t = list_entry(e, struct file_descriptor, elem);
         if (t->fd == fd) {
             lock_acquire(&file_lock);
-            result = file_tell(t->file);
+            result = file_tell(t->file_wrapper->file);
             lock_release(&file_lock);
             break;
         }
@@ -255,7 +268,7 @@ int filesize(int fd) {
         t = list_entry(e, struct file_descriptor, elem);
         if (t->fd == fd) {
             lock_acquire(&file_lock);
-            result = file_length(t->file);
+            result = file_length(t->file_wrapper->file);
             lock_release(&file_lock);
             break;
         }
@@ -280,7 +293,7 @@ int read(int fd, void *buffer, unsigned length) {
         if (t->fd == fd) {
             is_find = true;
             lock_acquire(&file_lock);
-            result = file_read(t->file, buffer, length);
+            result = file_read(t->file_wrapper->file, buffer, length);
             lock_release(&file_lock);
             break;
         }
@@ -309,7 +322,7 @@ int write(int fd, const void *buffer, unsigned length) {
         if (t->fd == fd) {
             is_find = true;
             lock_acquire(&file_lock);
-            result = file_write(t->file, buffer, length);
+            result = file_write(t->file_wrapper->file, buffer, length);
             lock_release(&file_lock);
             break;
         }
@@ -346,4 +359,54 @@ int wait(pid_t pid) {
 
     child_pid = process_wait(pid);
     return child_pid;
+}
+
+int dup2(int oldfd, int newfd) {
+    struct thread *curr = thread_current();
+    struct file_descriptor *file_descriptor;
+    struct file_descriptor *o_file_descriptor;
+    struct file_descriptor *n_file_descriptor;
+    struct list_elem *e;
+    bool is_find_o = false;
+    bool is_find_n = false;
+
+    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
+        file_descriptor = list_entry(e, struct file_descriptor, elem);
+        if (file_descriptor->fd == oldfd) {
+            o_file_descriptor = file_descriptor;
+            is_find_o = true;
+        } else if (file_descriptor->fd == newfd) {
+            n_file_descriptor = file_descriptor;
+            is_find_n = true;
+        }
+    }
+
+    if (!is_find_o) {
+        return -1;
+    }
+
+    if (oldfd == newfd) {
+        return newfd;
+    }
+
+    if (is_find_n) {
+        close(n_file_descriptor->fd);
+    }
+
+    n_file_descriptor = malloc(sizeof *n_file_descriptor);
+    if (n_file_descriptor == NULL) {
+        return TID_ERROR;
+    }
+    n_file_descriptor->file_wrapper = calloc(1, sizeof *n_file_descriptor->file_wrapper);
+    if (n_file_descriptor->file_wrapper == NULL) {
+        free(n_file_descriptor);
+        return TID_ERROR;
+    }
+    n_file_descriptor->fd = newfd;
+    n_file_descriptor->file_wrapper->file = file_descriptor->file_wrapper->file;
+    n_file_descriptor->file_wrapper->dup_cnt++;
+
+    list_push_back(&curr->fd_list, &n_file_descriptor->elem);
+
+    return newfd;
 }
