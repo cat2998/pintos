@@ -193,6 +193,7 @@ int open(const char *file) {
 
     fd->fd = curr->fd_count;
     fd->file_wrapper = file_wrapper;
+    fd->file_wrapper->dup_cnt = 0;
     fd->file_wrapper->file = openfile;
     list_push_back(&curr->fd_list, &fd->elem);
 
@@ -215,13 +216,13 @@ void close(int fd) {
     }
 
     if (is_find) {
+        lock_acquire(&file_lock);
         if (t->file_wrapper->dup_cnt == 0) {
-            lock_acquire(&file_lock);
             file_close(t->file_wrapper->file);
-            lock_release(&file_lock);
             free(t->file_wrapper);
         } else
             t->file_wrapper->dup_cnt--;
+        lock_release(&file_lock);
         free(t);
     }
 }
@@ -414,14 +415,15 @@ int dup2(int oldfd, int newfd) {
     if (is_find_n)
         close(n_file_descriptor->fd);
 
-    n_file_descriptor = malloc(sizeof *n_file_descriptor);
-    if (n_file_descriptor == NULL) {
+    n_file_descriptor = calloc(1, sizeof *n_file_descriptor);
+    if (n_file_descriptor == NULL)
         return TID_ERROR;
-    }
 
     n_file_descriptor->fd = newfd;
     n_file_descriptor->file_wrapper = o_file_descriptor->file_wrapper;
+    lock_acquire(&file_lock);
     n_file_descriptor->file_wrapper->dup_cnt++;
+    lock_release(&file_lock);
 
     list_push_back(&curr->fd_list, &n_file_descriptor->elem);
 

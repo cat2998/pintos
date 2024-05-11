@@ -229,46 +229,109 @@ int process_exec(void *f_name) {
     /* And then load the binary */
     success = load(file_name, &_if);
 
-    fd_list_init(0); // stdin
-    fd_list_init(1); // stdout
-    fd_list_init(2); // stderr
-
     /* If load failed, quit. */
     palloc_free_page(file_name);
     if (!success)
         return -1;
+
+    if (fd_list_init(0) == -1)
+        return -1; // stdin
+    // fd_list_init(1); // stdout
+    // fd_list_init(2); // stderr
 
     /* Start switched process. */
     do_iret(&_if);
     NOT_REACHED();
 }
 
-void fd_list_init(int fd_n) {
-    struct file_descriptor *fd;
-    struct file_ *file_wrapper;
+int fd_list_init(int fd_n) {
+    struct file_descriptor *fd1;
+    struct file_ *file_wrapper1;
+    struct file_descriptor *fd2;
+    struct file_ *file_wrapper2;
+    struct file_descriptor *fd3;
+    struct file_ *file_wrapper3;
     struct thread *t = thread_current();
 
-    fd = calloc(1, sizeof *fd);
-    if (fd == NULL)
+    fd1 = calloc(1, sizeof *fd1);
+    if (fd1 == NULL)
         return TID_ERROR;
 
-    file_wrapper = calloc(1, sizeof *file_wrapper);
-    if (file_wrapper == NULL) {
-        free(fd);
+    file_wrapper1 = calloc(1, sizeof *file_wrapper1);
+    if (file_wrapper1 == NULL) {
+        free(fd1);
         return TID_ERROR;
     }
 
-    fd->fd = fd_n;
-    fd->file_wrapper = file_wrapper;
-    if (fd_n == 0)
-        file_wrapper->_stdin = true;
-    else if (fd_n == 1)
-        file_wrapper->_stdout = true;
-    else if (fd_n == 2)
-        file_wrapper->_stderr = true;
-    file_wrapper->file = NULL;
+    fd1->fd = 0;
+    fd1->file_wrapper = file_wrapper1;
+    // if (fd_n == 0)
+    file_wrapper1->_stdin = true;
+    // else if (fd_n == 1)
+    //     file_wrapper1->_stdout = true;
+    // else if (fd_n == 2)
+    //     file_wrapper1->_stderr = true;
+    file_wrapper1->file = NULL;
 
-    list_push_back(&t->fd_list, &fd->elem);
+    list_push_back(&t->fd_list, &fd1->elem);
+
+    fd2 = calloc(1, sizeof *fd2);
+    if (fd2 == NULL) {
+        free(fd1);
+        free(file_wrapper1);
+        return TID_ERROR;
+    }
+
+    file_wrapper2 = calloc(1, sizeof *file_wrapper2);
+    if (file_wrapper2 == NULL) {
+        free(fd1);
+        free(file_wrapper1);
+        free(fd2);
+        return TID_ERROR;
+    }
+
+    fd2->fd = 1;
+    fd2->file_wrapper = file_wrapper2;
+    // if (fd_n == 0)
+    //     file_wrapper2->_stdin = true;
+    // else if (fd_n == 1)
+    file_wrapper2->_stdout = true;
+    // else if (fd_n == 2)
+    //     file_wrapper2->_stderr = true;
+    // file_wrapper2->file = NULL;
+
+    list_push_back(&t->fd_list, &fd2->elem);
+
+    fd3 = calloc(1, sizeof *fd3);
+    if (fd3 == NULL) {
+        free(fd1);
+        free(file_wrapper1);
+        free(fd2);
+        free(file_wrapper2);
+        return TID_ERROR;
+    }
+
+    file_wrapper3 = calloc(1, sizeof *file_wrapper3);
+    if (file_wrapper3 == NULL) {
+        free(fd1);
+        free(file_wrapper1);
+        free(fd2);
+        free(file_wrapper2);
+        free(fd3);
+        return TID_ERROR;
+    }
+
+    fd3->fd = 2;
+    fd3->file_wrapper = file_wrapper3;
+    // if (fd_n == 0)
+    //     file_wrapper3->_stdin = true;
+    // else if (fd_n == 1)
+    //     file_wrapper3->_stdout = true;
+    // else if (fd_n == 2)
+    //     file_wrapper3->_stderr = true;
+    file_wrapper3->file = NULL;
+
+    list_push_back(&t->fd_list, &fd3->elem);
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -318,13 +381,13 @@ void process_exit(void) {
         for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list);) {
             fd = list_entry(e, struct file_descriptor, elem);
             e = list_remove(e);
+            lock_acquire(&file_lock);
             if (fd->file_wrapper->dup_cnt == 0) {
-                lock_acquire(&file_lock);
                 file_close(fd->file_wrapper->file);
-                lock_release(&file_lock);
                 free(fd->file_wrapper);
             } else
                 fd->file_wrapper->dup_cnt--;
+            lock_release(&file_lock);
             free(fd);
         }
     }

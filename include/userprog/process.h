@@ -30,6 +30,6 @@ void argument_parsing(char *file_name, uint64_t *argc, char *argv[]);
 void setup_user_stack(struct intr_frame *if_, uint64_t argc, char *argv[]);
 
 /* std fd init for dup2 */
-void fd_list_init(int fd_n);
+int fd_list_init(int fd_n);
 
 #endif /* userprog/process.h */
