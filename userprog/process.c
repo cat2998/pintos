@@ -135,8 +135,11 @@ __do_fork(void *aux) {
     struct intr_frame *parent_if = &parent->if_;
     bool succ = true;
     struct list_elem *e;
+    struct list_elem *ed;
     struct file_descriptor *t;
+    struct file_descriptor *td;
     struct file_descriptor *n_fd;
+    struct file_descriptor *n_fdd;
 
     /* 1. Read the cpu context to local stack. */
     memcpy(&if_, parent_if, sizeof(struct intr_frame));
@@ -177,6 +180,20 @@ __do_fork(void *aux) {
             goto error;
         }
         list_push_back(&current->fd_list, &n_fd->elem);
+
+        if (t->is_dup) {
+            for (ed = list_begin(&t->dup_list); ed != list_end(&t->dup_list); ed = list_next(ed)) {
+                td = list_entry(ed, struct file_descriptor, elem);
+                n_fdd = calloc(1, sizeof *n_fdd);
+                if (n_fdd == NULL)
+                    goto error;
+                n_fdd->fd = td->fd;
+                lock_acquire(&file_lock);
+                n_fdd->file = td->file;
+                lock_release(&file_lock);
+                list_push_back(&n_fd->dup_list, &n_fdd->elem);
+            }
+        }
     }
     current->fd_count = parent->fd_count;
 
@@ -219,11 +236,56 @@ int process_exec(void *f_name) {
     if (!success)
         return -1;
 
+    if (fd_list_init(0) == -1)
+        return -1;
+
     /* Start switched process. */
     do_iret(&_if);
     NOT_REACHED();
 }
+int fd_list_init(int fd_n) {
+    struct file_descriptor *fd1;
+    struct file_descriptor *fd2;
+    struct file_descriptor *fd3;
+    struct thread *t = thread_current();
 
+    fd1 = calloc(1, sizeof *fd1);
+    if (fd1 == NULL)
+        return TID_ERROR;
+
+
+    fd1->fd = 0;
+    fd1->_stdin = true;
+    fd1->file = NULL;
+
+    list_push_back(&t->fd_list, &fd1->elem);
+
+    fd2 = calloc(1, sizeof *fd2);
+    if (fd2 == NULL) {
+        free(fd1);
+        return TID_ERROR;
+    }
+
+
+    fd2->fd = 1;
+    fd2->_stdout = true;
+    fd2->file = NULL;
+
+    list_push_back(&t->fd_list, &fd2->elem);
+
+    fd3 = calloc(1, sizeof *fd3);
+    if (fd3 == NULL) {
+        free(fd1);
+        free(fd2);
+        return TID_ERROR;
+    }
+
+    fd3->fd = 2;
+    fd2->_stderr = true;
+    fd3->file = NULL;
+
+    list_push_back(&t->fd_list, &fd3->elem);
+}
 /* Waits for thread TID to die and returns its exit status.  If
  * it was terminated by the kernel (i.e. killed due to an
  * exception), returns -1.  If TID is invalid or if it was not a
@@ -257,8 +319,10 @@ int process_wait(tid_t child_tid UNUSED) {
 void process_exit(void) {
     struct thread *curr = thread_current();
     struct list_elem *e;
+    struct list_elem *ed;
     struct thread *child;
     struct file_descriptor *fd;
+    struct file_descriptor *fd_d;
     int exit_status;
     /* TODO: Your code goes here.
      * TODO: Implement process termination message (see
@@ -270,6 +334,13 @@ void process_exit(void) {
     if (!list_empty(&curr->fd_list)) {
         for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list);) {
             fd = list_entry(e, struct file_descriptor, elem);
+            if (fd->is_dup) {
+                for (ed = list_begin(&fd->dup_list); ed != list_end(&fd->dup_list);) {
+                    fd_d = list_entry(ed, struct file_descriptor, elem);
+                    ed = list_remove(ed);
+                    free(fd_d);
+                }
+            }
             e = list_remove(e);
             file_close(fd->file);
             free(fd);
