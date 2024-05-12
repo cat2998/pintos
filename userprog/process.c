@@ -13,6 +13,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/gdt.h"
+#include "userprog/syscall.h"
 #include "userprog/tss.h"
 #include <debug.h>
 #include <inttypes.h>
@@ -182,7 +183,7 @@ __do_fork(void *aux) {
                 goto error;
             }
         } else {
-            memcpy(n_fd, t, sizeof *n_fd);
+            n_fd->file = NULL;
         }
 
         n_fd->fd = t->fd;
@@ -200,7 +201,13 @@ __do_fork(void *aux) {
                 n_fdd = calloc(1, sizeof *n_fdd);
                 if (n_fdd == NULL) // 여기서 실패하면 위에거 free 해주셈
                     goto error;
-                memcpy(n_fdd, td, sizeof *n_fdd);
+                n_fdd->fd = td->fd;
+                n_fdd->_stdin = td->_stdin;
+                n_fdd->_stdout = td->_stdout;
+                n_fdd->_stderr = td->_stderr;
+                n_fdd->is_dup = td->is_dup;
+                n_fdd->file = n_fd->file;
+                list_init(&n_fdd->dup_list);
                 list_push_back(&n_fd->dup_list, &n_fdd->elem);
             }
         }
@@ -265,7 +272,10 @@ int fd_list_init(int fd_n) {
 
     fd1->fd = 0;
     fd1->_stdin = true;
+    fd1->_stdout = false;
+    fd1->_stderr = false;
     fd1->file = NULL;
+    list_init(&fd1->dup_list);
 
     list_push_back(&t->fd_list, &fd1->elem);
 
@@ -276,8 +286,11 @@ int fd_list_init(int fd_n) {
     }
 
     fd2->fd = 1;
+    fd2->_stdin = false;
     fd2->_stdout = true;
+    fd2->_stderr = false;
     fd2->file = NULL;
+    list_init(&fd2->dup_list);
 
     list_push_back(&t->fd_list, &fd2->elem);
 
@@ -289,8 +302,11 @@ int fd_list_init(int fd_n) {
     }
 
     fd3->fd = 2;
-    fd2->_stderr = true;
+    fd3->_stdin = false;
+    fd3->_stdout = false;
+    fd3->_stderr = true;
     fd3->file = NULL;
+    list_init(&fd3->dup_list);
 
     list_push_back(&t->fd_list, &fd3->elem);
 }
