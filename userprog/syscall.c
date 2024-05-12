@@ -210,7 +210,14 @@ void close(int fd) {
     struct file_descriptor *dt;
     struct list_elem *e;
     struct list_elem *ed;
-    bool is_find = false;
+
+    /*1. 현재 스레드의 fd 리스트를 순회한다.
+      2. 찾은 fd가 dup_list의 루트 (원본 파일을 가지고 있는 fd고, 리스트를 가지고 있음)
+      3. 해당 fd의 dup_list의 첫번째 elem 저장 후 리스트에서 제거
+      4. 리스트가 비지 않았는지 확인
+      5. 만약 비었다면 기존의 루트의 파일을 fd_list에서 제거하고 free
+      6. 비지 않았다면 루트파일의 dup리스트를 저장해 둔 fd의 dup_list로 복사후 기존 루트 free
+      7. 처리가 완료된 새로운 root를 fd_list에 삽입*/
 
     for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
         t = list_entry(e, struct file_descriptor, elem);
@@ -219,23 +226,31 @@ void close(int fd) {
                 dt = list_entry(ed, struct file_descriptor, elem);
                 if (dt->fd == fd) {
                     list_remove(ed);
+                    free(dt);
                     if (list_empty(&t->dup_list))
                         t->is_dup = false;
                     break;
                 }
             }
         } else if (t->fd == fd) {
-            is_find = true;
-            e = list_remove(e);
-            break;
+            if (t->is_dup) {
+                dt = list_entry(list_begin(&t->dup_list), struct file_descriptor, elem);
+                list_remove(list_begin(&t->dup_list));
+                if (list_empty(&t->dup_list)) {
+                    list_remove(&t->elem);
+                } else {
+                    dt->is_dup = true;
+                    memcpy(&dt->dup_list, &t->dup_list, sizeof(struct list));
+                }
+                free(t);
+                list_push_back(&curr->fd_list, &dt->elem);
+            } else {
+                lock_acquire(&file_lock);
+                file_close(t->file);
+                lock_release(&file_lock);
+                free(t);
+            }
         }
-    }
-
-    if (is_find) {
-        lock_acquire(&file_lock);
-        file_close(t->file);
-        lock_release(&file_lock);
-        free(t);
     }
 }
 
@@ -500,6 +515,7 @@ int dup2(int oldfd, int newfd) {
         file_descriptor = list_entry(e, struct file_descriptor, elem);
         if (file_descriptor->fd == oldfd) {
             o_file_descriptor = file_descriptor;
+            o_file_descriptor_r = file_descriptor;
             is_find_o = true;
         } else if (file_descriptor->fd == newfd) {
             n_file_descriptor = file_descriptor;
