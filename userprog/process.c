@@ -168,10 +168,14 @@ __do_fork(void *aux) {
 
     for (e = list_begin(&parent->fd_list); e != list_end(&parent->fd_list); e = list_next(e)) {
         t = list_entry(e, struct file_descriptor, elem);
+
         n_fd = calloc(1, sizeof *n_fd);
         if (n_fd == NULL)
             goto error;
+
         n_fd->fd = t->fd;
+        list_init(&n_fd->dup_list);
+
         if (t->file) {
             lock_acquire(&file_lock);
             n_fd->file = file_duplicate(t->file);
@@ -182,6 +186,9 @@ __do_fork(void *aux) {
             }
         } else {
             memcpy(n_fd, t, sizeof *n_fd);
+            n_fd->_stdin = t->_stdin;
+            n_fd->_stdout = t->_stdout;
+            n_fd->_stderr = t->_stderr;
         }
 
         list_push_back(&current->fd_list, &n_fd->elem);
@@ -190,7 +197,7 @@ __do_fork(void *aux) {
             for (ed = list_begin(&t->dup_list); ed != list_end(&t->dup_list); ed = list_next(ed)) {
                 td = list_entry(ed, struct file_descriptor, elem);
                 n_fdd = calloc(1, sizeof *n_fdd);
-                if (n_fdd == NULL)
+                if (n_fdd == NULL) // 여기서 실패하면 위에거 free 해주셈
                     goto error;
                 memcpy(n_fdd, td, sizeof *n_fdd);
                 list_push_back(&n_fd->dup_list, &n_fdd->elem);

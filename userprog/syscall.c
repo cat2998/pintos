@@ -199,6 +199,7 @@ int open(const char *file) {
 
     fd->fd = curr->fd_count;
     fd->file = openfile;
+    list_init(&fd->dup_list);
     list_push_back(&curr->fd_list, &fd->elem);
 
     return curr->fd_count++;
@@ -211,15 +212,7 @@ void close(int fd) {
     struct list_elem *e;
     struct list_elem *ed;
 
-    /*1. 현재 스레드의 fd 리스트를 순회한다.
-      2. 찾은 fd가 dup_list의 루트 (원본 파일을 가지고 있는 fd고, 리스트를 가지고 있음)
-      3. 해당 fd의 dup_list의 첫번째 elem 저장 후 리스트에서 제거
-      4. 리스트가 비지 않았는지 확인
-      5. 만약 비었다면 기존의 루트의 파일을 fd_list에서 제거하고 free
-      6. 비지 않았다면 루트파일의 dup리스트를 저장해 둔 fd의 dup_list로 복사후 기존 루트 free
-      7. 처리가 완료된 새로운 root를 fd_list에 삽입*/
-
-    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
+    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list);) {
         t = list_entry(e, struct file_descriptor, elem);
         if (t->is_dup) {
             for (ed = list_begin(&t->dup_list); ed != list_end(&t->dup_list); ed = list_next(ed)) {
@@ -232,10 +225,11 @@ void close(int fd) {
                     break;
                 }
             }
-        } else if (t->fd == fd) {
+        }
+        if (t->fd == fd) {
             if (t->is_dup) {
                 dt = list_entry(list_begin(&t->dup_list), struct file_descriptor, elem);
-                list_remove(list_begin(&t->dup_list));
+                e = list_remove(list_begin(&t->dup_list));
                 if (list_empty(&t->dup_list)) {
                     list_remove(&t->elem);
                 } else {
@@ -245,12 +239,15 @@ void close(int fd) {
                 free(t);
                 list_push_back(&curr->fd_list, &dt->elem);
             } else {
+                e = list_remove(&t->elem);
                 lock_acquire(&file_lock);
                 file_close(t->file);
                 lock_release(&file_lock);
                 free(t);
+                break;
             }
-        }
+        } else
+            e = list_next(e);
     }
 }
 
@@ -399,7 +396,7 @@ int read(int fd, void *buffer, unsigned length) {
                 dt = list_entry(ed, struct file_descriptor, elem);
                 if (dt->fd == fd) {
                     is_find = true;
-                    if (t->_stdin)
+                    if (dt->_stdin)
                         return input_getc();
 
                     if (dt->file) {
@@ -450,7 +447,7 @@ int write(int fd, const void *buffer, unsigned length) {
             dt = list_entry(ed, struct file_descriptor, elem);
             if (dt->fd == fd) {
                 is_find = true;
-                if (t->_stdout) {
+                if (dt->_stdout) {
                     putbuf(buffer, length);
                     return length;
                 }
@@ -523,7 +520,7 @@ int dup2(int oldfd, int newfd) {
         }
         if (file_descriptor->is_dup) {
             for (ed = list_begin(&file_descriptor->dup_list); ed != list_end(&file_descriptor->dup_list); ed = list_next(ed)) {
-                file_descriptor_d = list_entry(e, struct file_descriptor, elem);
+                file_descriptor_d = list_entry(ed, struct file_descriptor, elem);
                 if (file_descriptor_d->fd == oldfd) {
                     o_file_descriptor = file_descriptor_d;
                     o_file_descriptor_r = file_descriptor;
@@ -550,8 +547,12 @@ int dup2(int oldfd, int newfd) {
         return TID_ERROR;
     n_file_descriptor->fd = newfd;
     n_file_descriptor->file = o_file_descriptor_r->file;
+    n_file_descriptor->_stdin = o_file_descriptor_r->_stdin;
+    n_file_descriptor->_stdout = o_file_descriptor_r->_stdout;
+    n_file_descriptor->_stderr = o_file_descriptor_r->_stderr;
+    list_init(&n_file_descriptor->dup_list);
     o_file_descriptor_r->is_dup = true;
     list_push_back(&o_file_descriptor_r->dup_list, &n_file_descriptor->elem);
 
-    return -1;
+    return newfd;
 }
