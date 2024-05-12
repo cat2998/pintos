@@ -112,6 +112,9 @@ void syscall_handler(struct intr_frame *f UNUSED) {
     case SYS_CLOSE:
         close(f->R.rdi);
         break;
+    case SYS_DUP2:
+        f->R.rax = dup2(f->R.rdi, f->R.rsi);
+        break;
     default:
         break;
     }
@@ -154,6 +157,9 @@ int open(const char *file) {
     int is_find = false;
 
     check_addr(file);
+
+    if (list_size(&curr->fd_list) > 128)
+        return -1;
 
     fd = calloc(1, sizeof *fd);
     if (fd == NULL)
@@ -409,15 +415,19 @@ int write(int fd, const void *buffer, unsigned length) {
 
     for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
         t = list_entry(e, struct file_descriptor, elem);
-        if (t->_stdout)
-            putbuf(buffer, length);
-        return length;
+        if (t->fd == fd) {
+            is_find = true;
+            if (t->_stdout) {
+                putbuf(buffer, length);
+                return length;
+            }
 
-        if (t->file) {
-            lock_acquire(&file_lock);
-            result = file_write(t->file, buffer, length);
-            lock_release(&file_lock);
-            break;
+            if (t->file) {
+                lock_acquire(&file_lock);
+                result = file_write(t->file, buffer, length);
+                lock_release(&file_lock);
+                break;
+            }
         }
     }
     if (t->is_dup) {
@@ -523,7 +533,8 @@ int dup2(int oldfd, int newfd) {
     if (n_file_descriptor == NULL)
         return TID_ERROR;
     n_file_descriptor->fd = newfd;
-    n_file_descriptor->file = o_file_descriptor->file;
+    n_file_descriptor->file = o_file_descriptor_r->file;
+    o_file_descriptor_r->is_dup = true;
     list_push_back(&o_file_descriptor_r->dup_list, &n_file_descriptor->elem);
 
     return -1;

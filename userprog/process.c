@@ -172,13 +172,18 @@ __do_fork(void *aux) {
         if (n_fd == NULL)
             goto error;
         n_fd->fd = t->fd;
-        lock_acquire(&file_lock);
-        n_fd->file = file_duplicate(t->file);
-        lock_release(&file_lock);
-        if (n_fd->file == NULL) {
-            free(n_fd);
-            goto error;
+        if (t->file) {
+            lock_acquire(&file_lock);
+            n_fd->file = file_duplicate(t->file);
+            lock_release(&file_lock);
+            if (n_fd->file == NULL) {
+                free(n_fd);
+                goto error;
+            }
+        } else {
+            memcpy(n_fd, t, sizeof *n_fd);
         }
+
         list_push_back(&current->fd_list, &n_fd->elem);
 
         if (t->is_dup) {
@@ -187,10 +192,7 @@ __do_fork(void *aux) {
                 n_fdd = calloc(1, sizeof *n_fdd);
                 if (n_fdd == NULL)
                     goto error;
-                n_fdd->fd = td->fd;
-                lock_acquire(&file_lock);
-                n_fdd->file = td->file;
-                lock_release(&file_lock);
+                memcpy(n_fdd, td, sizeof *n_fdd);
                 list_push_back(&n_fd->dup_list, &n_fdd->elem);
             }
         }
@@ -253,7 +255,6 @@ int fd_list_init(int fd_n) {
     if (fd1 == NULL)
         return TID_ERROR;
 
-
     fd1->fd = 0;
     fd1->_stdin = true;
     fd1->file = NULL;
@@ -265,7 +266,6 @@ int fd_list_init(int fd_n) {
         free(fd1);
         return TID_ERROR;
     }
-
 
     fd2->fd = 1;
     fd2->_stdout = true;
