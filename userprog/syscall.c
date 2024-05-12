@@ -158,6 +158,7 @@ int open(const char *file) {
 
     check_addr(file);
 
+    // multi-oom test 속도를 위한 파일개수 제한
     if (list_size(&curr->fd_list) > 128)
         return -1;
 
