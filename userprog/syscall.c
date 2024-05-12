@@ -200,6 +200,7 @@ int open(const char *file) {
     fd->fd = curr->fd_count;
     fd->file = openfile;
     list_init(&fd->dup_list);
+    fd->is_dup = false;
     list_push_back(&curr->fd_list, &fd->elem);
 
     return curr->fd_count++;
@@ -229,15 +230,17 @@ void close(int fd) {
         if (t->fd == fd) {
             if (t->is_dup) {
                 dt = list_entry(list_begin(&t->dup_list), struct file_descriptor, elem);
-                e = list_remove(list_begin(&t->dup_list));
+                list_remove(list_begin(&t->dup_list));
+                e = list_remove(&t->elem);
                 if (list_empty(&t->dup_list)) {
-                    list_remove(&t->elem);
+                    dt->is_dup = false;
                 } else {
                     dt->is_dup = true;
-                    memcpy(&dt->dup_list, &t->dup_list, sizeof(struct list));
                 }
+                memcpy(&dt->dup_list, &t->dup_list, sizeof(struct list));
                 free(t);
                 list_push_back(&curr->fd_list, &dt->elem);
+                break;
             } else {
                 e = list_remove(&t->elem);
                 lock_acquire(&file_lock);
@@ -288,6 +291,7 @@ void seek(int fd, unsigned position) {
         }
 
         if (t->is_dup) {
+            // if (!list_empty(&t->dup_list)) {
             for (ed = list_begin(&t->dup_list); ed != list_end(&t->dup_list); ed = list_next(ed)) {
                 dt = list_entry(ed, struct file_descriptor, elem);
                 if (dt->fd == fd) {
@@ -506,7 +510,6 @@ int dup2(int oldfd, int newfd) {
     struct list_elem *ed;
     bool is_find_o = false;
     bool is_find_n = false;
-    bool is_o_duped = false;
 
     for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
         file_descriptor = list_entry(e, struct file_descriptor, elem);
@@ -514,7 +517,8 @@ int dup2(int oldfd, int newfd) {
             o_file_descriptor = file_descriptor;
             o_file_descriptor_r = file_descriptor;
             is_find_o = true;
-        } else if (file_descriptor->fd == newfd) {
+        }
+        if (file_descriptor->fd == newfd) {
             n_file_descriptor = file_descriptor;
             is_find_n = true;
         }
@@ -525,7 +529,8 @@ int dup2(int oldfd, int newfd) {
                     o_file_descriptor = file_descriptor_d;
                     o_file_descriptor_r = file_descriptor;
                     is_find_o = true;
-                } else if (file_descriptor->fd == newfd) {
+                }
+                if (file_descriptor_d->fd == newfd) {
                     n_file_descriptor = file_descriptor_d;
                     is_find_n = true;
                 }

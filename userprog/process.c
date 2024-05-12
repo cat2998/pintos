@@ -173,9 +173,6 @@ __do_fork(void *aux) {
         if (n_fd == NULL)
             goto error;
 
-        n_fd->fd = t->fd;
-        list_init(&n_fd->dup_list);
-
         if (t->file) {
             lock_acquire(&file_lock);
             n_fd->file = file_duplicate(t->file);
@@ -186,10 +183,14 @@ __do_fork(void *aux) {
             }
         } else {
             memcpy(n_fd, t, sizeof *n_fd);
-            n_fd->_stdin = t->_stdin;
-            n_fd->_stdout = t->_stdout;
-            n_fd->_stderr = t->_stderr;
         }
+
+        n_fd->fd = t->fd;
+        n_fd->_stdin = t->_stdin;
+        n_fd->_stdout = t->_stdout;
+        n_fd->_stderr = t->_stderr;
+        n_fd->is_dup = t->is_dup;
+        list_init(&n_fd->dup_list);
 
         list_push_back(&current->fd_list, &n_fd->elem);
 
