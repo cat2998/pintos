@@ -179,7 +179,6 @@ int open(const char *file) {
 
     fd->fd = curr->fd_count;
     fd->file = openfile;
-    fd->is_dup = false;
     list_init(&fd->dup_list);
     list_push_back(&curr->fd_list, &fd->elem);
 
@@ -209,18 +208,12 @@ void close(int fd) {
         } else {
             new_root_fd = list_entry(list_begin(&root_fd->dup_list), struct file_descriptor, elem);
             list_remove(&new_root_fd->elem);
-            if (list_empty(&root_fd->dup_list)) {
-                new_root_fd->is_dup = false;
-            } else {
-                new_root_fd->is_dup = true;
+            if (!list_empty(&root_fd->dup_list))
                 memcpy(&new_root_fd->dup_list, &root_fd->dup_list, sizeof(struct list));
-            }
             list_push_back(&curr->fd_list, &new_root_fd->elem);
         }
-    } else {
-        if (list_empty(&root_fd->dup_list))
-            root_fd->is_dup = false;
     }
+
     free(find_fd);
 }
 
@@ -372,54 +365,7 @@ int dup2(int oldfd, int newfd) {
         return TID_ERROR;
 
     duplicate_fd(new_fd, old_fd, newfd);
-
     list_push_back(&old_root_fd->dup_list, &new_fd->elem);
-    old_root_fd->is_dup = true;
 
     return newfd;
-}
-
-void duplicate_fd(struct file_descriptor *new_fd, struct file_descriptor *old_fd, int newfd) {
-    memmove(new_fd, old_fd, sizeof *new_fd);
-    new_fd->fd = newfd;
-    list_init(&new_fd->dup_list);
-}
-
-struct file_descriptor *get_fd(int fd, struct file_descriptor **root) {
-    struct thread *curr = thread_current();
-    struct file_descriptor *t;
-    struct file_descriptor *dt;
-    struct list_elem *e;
-    struct list_elem *ed;
-
-    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
-        t = list_entry(e, struct file_descriptor, elem);
-        if (t->fd == fd) {
-            *root = t;
-            return t;
-        }
-        if (!list_empty(&t->dup_list)) {
-            for (ed = list_begin(&t->dup_list); ed != list_end(&t->dup_list); ed = list_next(ed)) {
-                dt = list_entry(ed, struct file_descriptor, elem);
-                if (dt->fd == fd) {
-                    *root = t;
-                    return dt;
-                }
-            }
-        }
-    }
-    return NULL;
-}
-
-struct thread *get_child(pid_t child_pid) {
-    struct thread *curr = thread_current();
-    struct list_elem *e;
-    struct thread *child;
-
-    for (e = list_begin(&curr->child_list); e != list_end(&curr->child_list); e = list_next(e)) {
-        child = list_entry(e, struct thread, c_elem);
-        if (child->tid == child_pid)
-            return child;
-    }
-    return NULL;
 }

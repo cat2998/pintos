@@ -7,7 +7,6 @@
 
 struct file_descriptor {
     int fd;
-    bool is_dup;
     bool _stdin;
     bool _stdout;
     bool _stderr;
