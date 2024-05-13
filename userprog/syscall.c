@@ -2,6 +2,7 @@
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "intrinsic.h"
+#include "lib/kernel/list.h"
 #include "lib/string.h"
 #include "threads/flags.h"
 #include "threads/interrupt.h"
@@ -34,6 +35,9 @@ unsigned tell(int fd);
 void close(int fd);
 
 int dup2(int oldfd, int newfd);
+
+struct file_descriptor *
+find_fd(int fd, bool *flag, /*struct file_descriptor *root*/ uint64_t *root);
 
 /* lock for access file_sys code */
 struct lock file_lock;
@@ -209,49 +213,43 @@ int open(const char *file) {
 void close(int fd) {
     struct thread *curr = thread_current();
     struct file_descriptor *t;
-    struct file_descriptor *dt;
+    struct file_descriptor *rt;
+    uint64_t rt_p;
     struct list_elem *e;
-    struct list_elem *ed;
+    int is_root = 0;
 
-    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list);) {
-        t = list_entry(e, struct file_descriptor, elem);
-        if (t->is_dup) {
-            for (ed = list_begin(&t->dup_list); ed != list_end(&t->dup_list); ed = list_next(ed)) {
-                dt = list_entry(ed, struct file_descriptor, elem);
-                if (dt->fd == fd) {
-                    list_remove(ed);
-                    free(dt);
-                    if (list_empty(&t->dup_list))
-                        t->is_dup = false;
-                    break;
-                }
-            }
-        }
-        if (t->fd == fd) {
-            if (t->is_dup) {
-                dt = list_entry(list_begin(&t->dup_list), struct file_descriptor, elem);
-                list_remove(list_begin(&t->dup_list));
-                e = list_remove(&t->elem);
-                if (list_empty(&t->dup_list)) {
-                    dt->is_dup = false;
-                } else {
-                    dt->is_dup = true;
-                }
-                memcpy(&dt->dup_list, &t->dup_list, sizeof(struct list));
-                free(t);
-                list_push_back(&curr->fd_list, &dt->elem);
-                break;
-            } else {
-                e = list_remove(&t->elem);
-                lock_acquire(&file_lock);
-                file_close(t->file);
-                lock_release(&file_lock);
-                free(t);
-                break;
-            }
-        } else
-            e = list_next(e);
+    t = find_fd(fd, &is_root, &rt_p);
+    rt = (struct file_descriptor *)rt_p;
+    if (!t)
+        return;
+
+    if (!is_root) {
+        list_remove(&t->elem);
+        free(t);
+        return;
     }
+
+    if (list_empty(&rt->dup_list)) {
+        list_remove(&rt->elem);
+        lock_acquire(&file_lock);
+        file_close(rt->file);
+        lock_release(&file_lock);
+        free(rt);
+        return;
+    }
+
+    list_remove(&rt->elem);
+    t = list_entry(list_begin(&rt->dup_list), struct file_descriptor, elem);
+    list_remove(list_begin(&rt->dup_list));
+
+    for (e = list_begin(&rt->dup_list); e != list_end(&rt->dup_list);) {
+        struct list_elem *tmp_e = e;
+        e = list_remove(e);
+        list_push_back(&t->dup_list, tmp_e);
+    }
+
+    list_push_back(&curr->fd_list, &t->elem);
+    free(rt);
 }
 
 bool create(const char *file, unsigned initial_size) {
@@ -374,47 +372,21 @@ int read(int fd, void *buffer, unsigned length) {
     struct list_elem *e;
     struct list_elem *ed;
     off_t result;
-    bool is_find = false;
+    uint64_t rt_p;
+    bool is_root = false;
 
     check_addr(buffer);
 
     // if (fd == 0) { * 표준입력일때 devices/input_getc(void) 함수 사용
     // }
 
-    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
-        t = list_entry(e, struct file_descriptor, elem);
-        if (t->fd == fd) {
-            is_find = true;
-            if (t->_stdin)
-                return input_getc();
+    t = find_fd(fd, &is_root, &rt_p);
+    if (!t)
+        return -1;
+    lock_acquire(&file_lock);
+    result = file_read(t->file, buffer, length);
+    lock_release(&file_lock);
 
-            if (t->file) {
-                lock_acquire(&file_lock);
-                result = file_read(t->file, buffer, length);
-                lock_release(&file_lock);
-                break;
-            }
-        }
-        if (t->is_dup) {
-            for (ed = list_begin(&t->dup_list); ed != list_end(&t->dup_list); ed = list_next(ed)) {
-                dt = list_entry(ed, struct file_descriptor, elem);
-                if (dt->fd == fd) {
-                    is_find = true;
-                    if (dt->_stdin)
-                        return input_getc();
-
-                    if (dt->file) {
-                        lock_acquire(&file_lock);
-                        result = file_read(dt->file, buffer, length);
-                        lock_release(&file_lock);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    if (!is_find)
-        result = -1;
     return result;
 }
 
@@ -500,64 +472,78 @@ int wait(pid_t pid) {
 }
 
 int dup2(int oldfd, int newfd) {
+    struct file_descriptor *o_fd_r;
+    uint64_t o_fd_r_p;
+    uint64_t n_fd_r_p;
+    struct file_descriptor *o_fd;
+    struct file_descriptor *n_fd;
+    struct file_descriptor *n_fd_r;
+    bool is_root_o = false;
+    bool is_root_n = false;
+
+    o_fd = find_fd(oldfd, &is_root_o, &o_fd_r_p);
+    if (!o_fd) {
+        return -1;
+    }
+
+    if (oldfd == newfd) {
+        return newfd;
+    }
+
+    n_fd = find_fd(newfd, &is_root_n, &n_fd_r_p);
+
+    if (n_fd) {
+        close(newfd);
+    }
+
+    n_fd = calloc(1, sizeof *n_fd);
+    if (n_fd == NULL) {
+        return TID_ERROR;
+    }
+
+    n_fd->fd = newfd;
+    n_fd->file = o_fd->file;
+    n_fd->_stdin = o_fd->_stdin;
+    n_fd->_stdout = o_fd->_stdout;
+    n_fd->_stderr = o_fd->_stderr;
+    list_init(&n_fd->dup_list);
+
+    if (is_root_o) {
+        list_push_back(&o_fd->dup_list, &n_fd->elem);
+        return newfd;
+    } else {
+        o_fd_r = (struct file_descriptor *)o_fd_r_p;
+        list_push_back(&o_fd_r->dup_list, &n_fd->elem);
+        return newfd;
+    }
+}
+
+struct file_descriptor *
+find_fd(int fd, bool *flag, /*struct file_descriptor *root*/ uint64_t *root) {
     struct thread *curr = thread_current();
-    struct file_descriptor *file_descriptor;
-    struct file_descriptor *file_descriptor_d;
-    struct file_descriptor *o_file_descriptor;
-    struct file_descriptor *o_file_descriptor_r;
-    struct file_descriptor *n_file_descriptor;
+    struct file_descriptor *t;
+    struct file_descriptor *dt;
     struct list_elem *e;
     struct list_elem *ed;
-    bool is_find_o = false;
-    bool is_find_n = false;
 
     for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
-        file_descriptor = list_entry(e, struct file_descriptor, elem);
-        if (file_descriptor->fd == oldfd) {
-            o_file_descriptor = file_descriptor;
-            o_file_descriptor_r = file_descriptor;
-            is_find_o = true;
+        t = list_entry(e, struct file_descriptor, elem);
+        if (t->fd == fd) {
+            *flag = true;
+            *root = t;
+            return t;
         }
-        if (file_descriptor->fd == newfd) {
-            n_file_descriptor = file_descriptor;
-            is_find_n = true;
-        }
-        if (file_descriptor->is_dup) {
-            for (ed = list_begin(&file_descriptor->dup_list); ed != list_end(&file_descriptor->dup_list); ed = list_next(ed)) {
-                file_descriptor_d = list_entry(ed, struct file_descriptor, elem);
-                if (file_descriptor_d->fd == oldfd) {
-                    o_file_descriptor = file_descriptor_d;
-                    o_file_descriptor_r = file_descriptor;
-                    is_find_o = true;
-                }
-                if (file_descriptor_d->fd == newfd) {
-                    n_file_descriptor = file_descriptor_d;
-                    is_find_n = true;
+
+        if (!list_empty(&t->dup_list)) {
+            for (ed = list_begin(&t->dup_list); ed != list_end(&t->dup_list); ed = list_next(ed)) {
+                dt = list_entry(ed, struct file_descriptor, elem);
+                if (t->fd == fd) {
+                    *flag = false;
+                    *root = t;
+                    return dt;
                 }
             }
         }
     }
-
-    if (!is_find_o)
-        return -1;
-
-    if (oldfd == newfd)
-        return newfd;
-
-    if (is_find_n)
-        close(n_file_descriptor->fd);
-
-    n_file_descriptor = calloc(1, sizeof *n_file_descriptor);
-    if (n_file_descriptor == NULL)
-        return TID_ERROR;
-    n_file_descriptor->fd = newfd;
-    n_file_descriptor->file = o_file_descriptor_r->file;
-    n_file_descriptor->_stdin = o_file_descriptor_r->_stdin;
-    n_file_descriptor->_stdout = o_file_descriptor_r->_stdout;
-    n_file_descriptor->_stderr = o_file_descriptor_r->_stderr;
-    list_init(&n_file_descriptor->dup_list);
-    o_file_descriptor_r->is_dup = true;
-    list_push_back(&o_file_descriptor_r->dup_list, &n_file_descriptor->elem);
-
-    return newfd;
+    return NULL;
 }
