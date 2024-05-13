@@ -1,7 +1,9 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
 
+#include "filesys/file.h"
 #include "threads/interrupt.h"
+#include "threads/synch.h"
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
@@ -88,18 +90,28 @@ struct thread {
     /* Owned by thread.c. */
     tid_t tid;                 /* Thread identifier. */
     enum thread_status status; /* Thread state. */
+    int exit_status;           /* exit state. */
     char name[16];             /* Name (for debugging purposes). */
     int priority;              /* Priority. */
     int origin_priority;       /* origin Priority*/
     int64_t wake_tick;         /* 일어날 시간 */
+    int fd_count;              /* file descriptor count */
 
     struct list donations;     /* 기부해준 스레드 리스트 */
     struct lock *wait_on_lock; /* 내가 기다리는 lock */
-        
+    struct list fd_list;       /* file descriptor list*/
+    struct list child_list;    /* child process list*/
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;   /* List element. */
     struct list_elem d_elem; /* donations element*/
+    struct list_elem c_elem; /* child_list element*/
 
+    struct semaphore fork_sema; /* semaphore for fork*/
+    struct semaphore wait_sema; /* semaphore for wait*/
+    struct semaphore exit_sema; /* semaphore for exit*/
+
+    struct file *exec_file;
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint64_t *pml4; /* Page map level 4 */
@@ -110,8 +122,9 @@ struct thread {
 #endif
 
     /* Owned by thread.c. */
-    struct intr_frame tf; /* Information for switching */
-    unsigned magic;       /* Detects stack overflow. */
+    struct intr_frame tf;  /* Information for switching */
+    struct intr_frame if_; /* Information for fork */
+    unsigned magic;        /* Detects stack overflow. */
 };
 
 /* If false (default), use round-robin scheduler.

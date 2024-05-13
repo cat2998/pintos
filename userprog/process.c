@@ -6,11 +6,14 @@
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/mmu.h"
 #include "threads/palloc.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/gdt.h"
+#include "userprog/syscall.h"
 #include "userprog/tss.h"
 #include <debug.h>
 #include <inttypes.h>
@@ -26,7 +29,7 @@ static void process_cleanup(void);
 static bool load(const char *file_name, struct intr_frame *if_);
 static void initd(void *f_name);
 static void __do_fork(void *);
-
+extern struct lock file_lock;
 /* General process initializer for initd and other process. */
 static void
 process_init(void) {
@@ -48,6 +51,9 @@ tid_t process_create_initd(const char *file_name) {
     if (fn_copy == NULL)
         return TID_ERROR;
     strlcpy(fn_copy, file_name, PGSIZE);
+
+    char **save_ptr;
+    strtok_r(file_name, " ", save_ptr);
 
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
@@ -90,21 +96,28 @@ duplicate_pte(uint64_t *pte, void *va, void *aux) {
     bool writable;
 
     /* 1. TODO: If the parent_page is kernel page, then return immediately. */
-
+    if (is_kern_pte(pte))
+        return true;
     /* 2. Resolve VA from the parent's page map level 4. */
     parent_page = pml4_get_page(parent->pml4, va);
 
     /* 3. TODO: Allocate new PAL_USER page for the child and set result to
      *    TODO: NEWPAGE. */
+    newpage = palloc_get_page(PAL_USER);
+    if (newpage == NULL)
+        return false;
 
     /* 4. TODO: Duplicate parent's page to the new page and
      *    TODO: check whether parent's page is writable or not (set WRITABLE
      *    TODO: according to the result). */
-
+    memcpy(newpage, parent_page, PGSIZE);
+    writable = is_writable(pte);
     /* 5. Add new page to child's page table at address VA with WRITABLE
      *    permission. */
     if (!pml4_set_page(current->pml4, va, newpage, writable)) {
         /* 6. TODO: if fail to insert page, do error handling. */
+        palloc_free_page(newpage);
+        return false;
     }
     return true;
 }
@@ -119,12 +132,20 @@ __do_fork(void *aux) {
     struct intr_frame if_;
     struct thread *parent = (struct thread *)aux;
     struct thread *current = thread_current();
-    /* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-    struct intr_frame *parent_if;
+    struct intr_frame *parent_if = &parent->if_;
     bool succ = true;
+
+    struct file_descriptor *parent_fd;
+    struct file_descriptor *parent_dup_fd;
+    struct file_descriptor *child_fd;
+    struct file_descriptor *child_dup_fd;
+
+    struct list_elem *e;
+    struct list_elem *ed;
 
     /* 1. Read the cpu context to local stack. */
     memcpy(&if_, parent_if, sizeof(struct intr_frame));
+    if_.R.rax = 0;
 
     /* 2. Duplicate PT */
     current->pml4 = pml4_create();
@@ -147,13 +168,53 @@ __do_fork(void *aux) {
      * TODO:       from the fork() until this function successfully duplicates
      * TODO:       the resources of parent.*/
 
+    for (e = list_begin(&parent->fd_list); e != list_end(&parent->fd_list); e = list_next(e)) {
+        parent_fd = list_entry(e, struct file_descriptor, elem);
+
+        child_fd = calloc(1, sizeof *child_fd);
+        if (child_fd == NULL)
+            goto error;
+
+        duplicate_fd(child_fd, parent_fd, parent_fd->fd);
+        if (parent_fd->file) {
+            lock_acquire(&file_lock);
+            child_fd->file = file_duplicate(parent_fd->file);
+            lock_release(&file_lock);
+            if (child_fd->file == NULL) {
+                free(child_fd);
+                goto error;
+            }
+        }
+
+        list_push_back(&current->fd_list, &child_fd->elem);
+
+        if (!list_empty(&parent_fd->dup_list)) {
+            for (ed = list_begin(&parent_fd->dup_list); ed != list_end(&parent_fd->dup_list); ed = list_next(ed)) {
+                parent_dup_fd = list_entry(ed, struct file_descriptor, elem);
+                child_dup_fd = calloc(1, sizeof *child_dup_fd);
+                if (child_dup_fd == NULL)
+                    goto error;
+
+                duplicate_fd(child_dup_fd, parent_dup_fd, parent_dup_fd->fd);
+                child_dup_fd->file = child_fd->file;
+                list_push_back(&child_fd->dup_list, &child_dup_fd->elem);
+            }
+        }
+    }
+    current->fd_count = parent->fd_count;
+
     process_init();
 
     /* Finally, switch to the newly created process. */
-    if (succ)
+    if (succ) {
+        sema_up(&parent->fork_sema);
         do_iret(&if_);
+    }
+
 error:
-    thread_exit();
+    current->tid = TID_ERROR;
+    sema_up(&parent->fork_sema);
+    exit(TID_ERROR);
 }
 
 /* Switch the current execution context to the f_name.
@@ -181,11 +242,38 @@ int process_exec(void *f_name) {
     if (!success)
         return -1;
 
+    if (fd_list_init() == -1)
+        return -1;
+
     /* Start switched process. */
     do_iret(&_if);
     NOT_REACHED();
 }
 
+int fd_list_init(void) {
+    struct file_descriptor *fd;
+    struct thread *current = thread_current();
+
+    for (int i = 0; i < 3; i++) {
+        fd = calloc(1, sizeof *fd);
+        if (fd == NULL)
+            return TID_ERROR;
+
+        if (i == 0) {
+            fd->_stdin = true;
+        } else if (i == 1) {
+            fd->_stdout = true;
+        } else {
+            fd->_stderr = true;
+        }
+        fd->fd = i;
+        fd->file = NULL;
+        list_init(&fd->dup_list);
+
+        list_push_back(&current->fd_list, &fd->elem);
+    }
+    return 1;
+}
 /* Waits for thread TID to die and returns its exit status.  If
  * it was terminated by the kernel (i.e. killed due to an
  * exception), returns -1.  If TID is invalid or if it was not a
@@ -196,27 +284,74 @@ int process_exec(void *f_name) {
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
 int process_wait(tid_t child_tid UNUSED) {
-    /* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
-     * XXX:       to add infinite loop here before
-     * XXX:       implementing the process_wait. */
-    return -1;
+    struct thread *current = thread_current();
+    struct list_elem *e;
+    struct thread *child;
+    int exit_status;
+
+    child = get_child(child_tid);
+    if (!child)
+        return -1;
+
+    sema_down(&child->wait_sema);
+    exit_status = child->exit_status;
+    list_remove(&child->c_elem);
+    sema_up(&child->exit_sema);
+    return exit_status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
 void process_exit(void) {
     struct thread *curr = thread_current();
+    struct list_elem *e;
+    struct list_elem *ed;
+    struct thread *child;
+    struct file_descriptor *fd;
+    struct file_descriptor *dup_fd;
+    int exit_status;
     /* TODO: Your code goes here.
      * TODO: Implement process termination message (see
      * TODO: project2/process_termination.html).
      * TODO: We recommend you to implement process resource cleanup here. */
 
     process_cleanup();
+
+    if (!list_empty(&curr->fd_list)) {
+        for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list);) {
+            fd = list_entry(e, struct file_descriptor, elem);
+            if (!list_empty(&fd->dup_list)) {
+                for (ed = list_begin(&fd->dup_list); ed != list_end(&fd->dup_list);) {
+                    dup_fd = list_entry(ed, struct file_descriptor, elem);
+                    ed = list_remove(ed);
+                    free(dup_fd);
+                }
+            }
+            e = list_remove(e);
+            file_close(fd->file);
+            free(fd);
+        }
+    }
+
+    if (!list_empty(&curr->child_list)) {
+        for (e = list_begin(&curr->child_list); e != list_end(&curr->child_list); e = list_next(e)) {
+            child = list_entry(e, struct thread, c_elem);
+            sema_up(&child->exit_sema);
+        }
+    }
+
+    sema_up(&curr->wait_sema);
+    sema_down(&curr->exit_sema);
 }
 
 /* Free the current process's resources. */
 static void
 process_cleanup(void) {
     struct thread *curr = thread_current();
+
+    if (curr->exec_file != NULL) {
+        file_close(curr->exec_file);
+        curr->exec_file = NULL;
+    }
 
 #ifdef VM
     supplemental_page_table_kill(&curr->spt);
@@ -321,6 +456,10 @@ load(const char *file_name, struct intr_frame *if_) {
     off_t file_ofs;
     bool success = false;
     int i;
+    uint64_t argc;
+    char *argv[128];
+
+    argument_parsing(file_name, &argc, argv);
 
     /* Allocate and activate page directory. */
     t->pml4 = pml4_create();
@@ -329,11 +468,14 @@ load(const char *file_name, struct intr_frame *if_) {
     process_activate(thread_current());
 
     /* Open executable file. */
+    lock_acquire(&file_lock);
     file = filesys_open(file_name);
+    lock_release(&file_lock);
     if (file == NULL) {
         printf("load: %s: open failed\n", file_name);
         goto done;
     }
+    file_deny_write(file);
 
     /* Read and verify executable header. */
     if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr || memcmp(ehdr.e_ident, "\177ELF\2\1\1", 7) || ehdr.e_type != 2 || ehdr.e_machine != 0x3E // amd64
@@ -402,11 +544,16 @@ load(const char *file_name, struct intr_frame *if_) {
 
     /* TODO: Your code goes here.
      * TODO: Implement argument passing (see project2/argument_passing.html). */
+    setup_user_stack(if_, argc, argv);
 
     success = true;
 
 done:
     /* We arrive here whether the load is successful or not. */
+    if (success) {
+        t->exec_file = file;
+        return success;
+    }
     file_close(file);
     return success;
 }
@@ -621,3 +768,81 @@ setup_stack(struct intr_frame *if_) {
     return success;
 }
 #endif /* VM */
+
+void argument_parsing(char *file_name, uint64_t *argc, char *argv[]) {
+    char *token, *save_ptr;
+
+    int i = 0;
+    for (token = strtok_r(file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr))
+        argv[i++] = token;
+    *argc = i;
+}
+
+void setup_user_stack(struct intr_frame *if_, uint64_t argc, char *argv[]) {
+    uintptr_t rsp = if_->rsp;
+    int acc_l = 0, l = 0;
+    uintptr_t temp[argc];
+
+    for (int i = argc - 1; i >= 0; i--) {
+        l = strlen(argv[i]) + 1;
+        rsp -= l;
+        acc_l += l;
+        temp[i] = rsp;
+        memcpy(rsp, argv[i], l);
+    }
+    rsp -= WORD_SIZE - (acc_l % WORD_SIZE); // padding
+    rsp -= WORD_SIZE;                       // NULL pointer boundary
+    for (int i = argc - 1; i >= 0; i--) {
+        rsp -= WORD_SIZE;
+        memcpy(rsp, &temp[i], WORD_SIZE);
+    }
+    if_->R.rsi = rsp;
+    rsp -= WORD_SIZE;
+    if_->rsp = rsp;
+    if_->R.rdi = argc;
+}
+
+void duplicate_fd(struct file_descriptor *new_fd, struct file_descriptor *old_fd, int newfd) {
+    memmove(new_fd, old_fd, sizeof *new_fd);
+    new_fd->fd = newfd;
+    list_init(&new_fd->dup_list);
+}
+
+struct file_descriptor *get_fd(int fd, struct file_descriptor **root) {
+    struct thread *curr = thread_current();
+    struct file_descriptor *t;
+    struct file_descriptor *dt;
+    struct list_elem *e;
+    struct list_elem *ed;
+
+    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
+        t = list_entry(e, struct file_descriptor, elem);
+        if (t->fd == fd) {
+            *root = t;
+            return t;
+        }
+        if (!list_empty(&t->dup_list)) {
+            for (ed = list_begin(&t->dup_list); ed != list_end(&t->dup_list); ed = list_next(ed)) {
+                dt = list_entry(ed, struct file_descriptor, elem);
+                if (dt->fd == fd) {
+                    *root = t;
+                    return dt;
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+struct thread *get_child(pid_t child_pid) {
+    struct thread *curr = thread_current();
+    struct list_elem *e;
+    struct thread *child;
+
+    for (e = list_begin(&curr->child_list); e != list_end(&curr->child_list); e = list_next(e)) {
+        child = list_entry(e, struct thread, c_elem);
+        if (child->tid == child_pid)
+            return child;
+    }
+    return NULL;
+}

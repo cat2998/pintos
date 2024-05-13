@@ -184,12 +184,14 @@ tid_t thread_create(const char *name, int priority, thread_func *function, void 
 
     /* Allocate thread. */
     t = palloc_get_page(PAL_ZERO);
+    // t = palloc_get_multiple(PAL_ZERO, 100);
     if (t == NULL)
         return TID_ERROR;
 
     /* Initialize thread. */
     init_thread(t, name, priority);
     tid = t->tid = allocate_tid();
+    list_push_back(&curr->child_list, &t->c_elem);
 
     /* Call the kernel_thread if it scheduled.
      * Note) rdi is 1st argument, and rsi is 2nd argument. */
@@ -359,7 +361,7 @@ void thread_set_priority(int new_priority) {
     curr->origin_priority = new_priority;
 
     if (!list_empty(&curr->donations)) {
-        list_sort(&curr->donations,compare_priority,NULL);
+        list_sort(&curr->donations, compare_priority, NULL);
         struct thread *priory_thread = list_entry(list_begin(&curr->donations), struct thread, d_elem);
         donate_priority(priory_thread->wait_on_lock, priory_thread);
     }
@@ -457,10 +459,17 @@ init_thread(struct thread *t, const char *name, int priority) {
     t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
     t->priority = priority;
     t->origin_priority = priority;
+    t->fd_count = 3;
     t->wait_on_lock = NULL;
     t->magic = THREAD_MAGIC;
 
     list_init(&t->donations);
+    list_init(&t->fd_list);
+    list_init(&t->child_list);
+
+    sema_init(&t->fork_sema, 0);
+    sema_init(&t->wait_sema, 0);
+    sema_init(&t->exit_sema, 0);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -583,6 +592,7 @@ do_schedule(int status) {
         struct thread *victim =
             list_entry(list_pop_front(&destruction_req), struct thread, elem);
         palloc_free_page(victim);
+        // palloc_free_multiple(victim, 100);
     }
     thread_current()->status = status;
     schedule();
@@ -647,8 +657,7 @@ bool compare_priority(const struct list_elem *a, const struct list_elem *b, void
 
 void ready_list_preempt() {
     struct thread *t = list_entry(list_begin(&ready_list), struct thread, elem);
-    
+
     if (!intr_context() && thread_current()->priority < t->priority)
         thread_yield();
-    
 }
