@@ -26,4 +26,9 @@ void process_activate(struct thread *next);
 void argument_parsing(char *file_name, uint64_t *argc, char *argv[]);
 void setup_user_stack(struct intr_frame *if_, uint64_t argc, char *argv[]);
 
+void duplicate_fd(struct file_descriptor *new_fd, struct file_descriptor *old_fd, int newfd);
+struct file_descriptor *get_fd(int fd, struct file_descriptor **root);
+struct thread *get_child(tid_t child_pid);
+int fd_list_init(void);
+
 #endif /* userprog/process.h */
