@@ -13,6 +13,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/gdt.h"
+#include "userprog/syscall.h"
 #include "userprog/tss.h"
 #include <debug.h>
 #include <inttypes.h>
@@ -131,12 +132,16 @@ __do_fork(void *aux) {
     struct intr_frame if_;
     struct thread *parent = (struct thread *)aux;
     struct thread *current = thread_current();
-    /* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
     struct intr_frame *parent_if = &parent->if_;
     bool succ = true;
+
+    struct file_descriptor *parent_fd;
+    struct file_descriptor *parent_dup_fd;
+    struct file_descriptor *child_fd;
+    struct file_descriptor *child_dup_fd;
+
     struct list_elem *e;
-    struct file_descriptor *t;
-    struct file_descriptor *n_fd;
+    struct list_elem *ed;
 
     /* 1. Read the cpu context to local stack. */
     memcpy(&if_, parent_if, sizeof(struct intr_frame));
@@ -164,19 +169,37 @@ __do_fork(void *aux) {
      * TODO:       the resources of parent.*/
 
     for (e = list_begin(&parent->fd_list); e != list_end(&parent->fd_list); e = list_next(e)) {
-        t = list_entry(e, struct file_descriptor, elem);
-        n_fd = calloc(1, sizeof *n_fd);
-        if (n_fd == NULL)
+        parent_fd = list_entry(e, struct file_descriptor, elem);
+
+        child_fd = calloc(1, sizeof *child_fd);
+        if (child_fd == NULL)
             goto error;
-        n_fd->fd = t->fd;
-        lock_acquire(&file_lock);
-        n_fd->file = file_duplicate(t->file);
-        lock_release(&file_lock);
-        if (n_fd->file == NULL) {
-            free(n_fd);
-            goto error;
+
+        duplicate_fd(child_fd, parent_fd, parent_fd->fd);
+        if (parent_fd->file) {
+            lock_acquire(&file_lock);
+            child_fd->file = file_duplicate(parent_fd->file);
+            lock_release(&file_lock);
+            if (child_fd->file == NULL) {
+                free(child_fd);
+                goto error;
+            }
         }
-        list_push_back(&current->fd_list, &n_fd->elem);
+
+        list_push_back(&current->fd_list, &child_fd->elem);
+
+        if (!list_empty(&parent_fd->dup_list)) {
+            for (ed = list_begin(&parent_fd->dup_list); ed != list_end(&parent_fd->dup_list); ed = list_next(ed)) {
+                parent_dup_fd = list_entry(ed, struct file_descriptor, elem);
+                child_dup_fd = calloc(1, sizeof *child_dup_fd);
+                if (child_dup_fd == NULL)
+                    goto error;
+
+                duplicate_fd(child_dup_fd, parent_dup_fd, parent_dup_fd->fd);
+                child_dup_fd->file = child_fd->file;
+                list_push_back(&child_fd->dup_list, &child_dup_fd->elem);
+            }
+        }
     }
     current->fd_count = parent->fd_count;
 
@@ -219,11 +242,38 @@ int process_exec(void *f_name) {
     if (!success)
         return -1;
 
+    if (fd_list_init() == -1)
+        return -1;
+
     /* Start switched process. */
     do_iret(&_if);
     NOT_REACHED();
 }
 
+int fd_list_init(void) {
+    struct file_descriptor *fd;
+    struct thread *current = thread_current();
+
+    for (int i = 0; i < 3; i++) {
+        fd = calloc(1, sizeof *fd);
+        if (fd == NULL)
+            return TID_ERROR;
+
+        if (i == 0) {
+            fd->_stdin = true;
+        } else if (i == 1) {
+            fd->_stdout = true;
+        } else {
+            fd->_stderr = true;
+        }
+        fd->fd = i;
+        fd->file = NULL;
+        list_init(&fd->dup_list);
+
+        list_push_back(&current->fd_list, &fd->elem);
+    }
+    return 1;
+}
 /* Waits for thread TID to die and returns its exit status.  If
  * it was terminated by the kernel (i.e. killed due to an
  * exception), returns -1.  If TID is invalid or if it was not a
@@ -239,26 +289,25 @@ int process_wait(tid_t child_tid UNUSED) {
     struct thread *child;
     int exit_status;
 
-    for (e = list_begin(&current->child_list); e != list_end(&current->child_list); e = list_next(e)) {
-        child = list_entry(e, struct thread, c_elem);
-        if (child->tid == child_tid) {
-            sema_down(&child->wait_sema);
-            exit_status = child->exit_status;
-            list_remove(e);
-            sema_up(&child->exit_sema);
-            return exit_status;
-        }
-    }
+    child = get_child(child_tid);
+    if (!child)
+        return -1;
 
-    return -1;
+    sema_down(&child->wait_sema);
+    exit_status = child->exit_status;
+    list_remove(&child->c_elem);
+    sema_up(&child->exit_sema);
+    return exit_status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
 void process_exit(void) {
     struct thread *curr = thread_current();
     struct list_elem *e;
+    struct list_elem *ed;
     struct thread *child;
     struct file_descriptor *fd;
+    struct file_descriptor *dup_fd;
     int exit_status;
     /* TODO: Your code goes here.
      * TODO: Implement process termination message (see
@@ -270,6 +319,13 @@ void process_exit(void) {
     if (!list_empty(&curr->fd_list)) {
         for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list);) {
             fd = list_entry(e, struct file_descriptor, elem);
+            if (!list_empty(&fd->dup_list)) {
+                for (ed = list_begin(&fd->dup_list); ed != list_end(&fd->dup_list);) {
+                    dup_fd = list_entry(ed, struct file_descriptor, elem);
+                    ed = list_remove(ed);
+                    free(dup_fd);
+                }
+            }
             e = list_remove(e);
             file_close(fd->file);
             free(fd);
@@ -744,4 +800,49 @@ void setup_user_stack(struct intr_frame *if_, uint64_t argc, char *argv[]) {
     rsp -= WORD_SIZE;
     if_->rsp = rsp;
     if_->R.rdi = argc;
+}
+
+void duplicate_fd(struct file_descriptor *new_fd, struct file_descriptor *old_fd, int newfd) {
+    memmove(new_fd, old_fd, sizeof *new_fd);
+    new_fd->fd = newfd;
+    list_init(&new_fd->dup_list);
+}
+
+struct file_descriptor *get_fd(int fd, struct file_descriptor **root) {
+    struct thread *curr = thread_current();
+    struct file_descriptor *t;
+    struct file_descriptor *dt;
+    struct list_elem *e;
+    struct list_elem *ed;
+
+    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = list_next(e)) {
+        t = list_entry(e, struct file_descriptor, elem);
+        if (t->fd == fd) {
+            *root = t;
+            return t;
+        }
+        if (!list_empty(&t->dup_list)) {
+            for (ed = list_begin(&t->dup_list); ed != list_end(&t->dup_list); ed = list_next(ed)) {
+                dt = list_entry(ed, struct file_descriptor, elem);
+                if (dt->fd == fd) {
+                    *root = t;
+                    return dt;
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+struct thread *get_child(pid_t child_pid) {
+    struct thread *curr = thread_current();
+    struct list_elem *e;
+    struct thread *child;
+
+    for (e = list_begin(&curr->child_list); e != list_end(&curr->child_list); e = list_next(e)) {
+        child = list_entry(e, struct thread, c_elem);
+        if (child->tid == child_pid)
+            return child;
+    }
+    return NULL;
 }
