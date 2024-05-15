@@ -7,6 +7,8 @@
 
 struct list frame_list;
 
+// #define VA_MASK(va) (((uint64_t)va) & ~0xFFF)
+
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
 void vm_init(void) {
@@ -208,7 +210,8 @@ void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
 
 uint64_t page_hash_func(const struct hash_elem *e, void *aux) {
     struct page *p = hash_entry(e, struct page, hash_elem);
-    return hash_bytes(p->va, sizeof *p->va);
+    // p->va = VA_MASK(p->va);
+    return hash_bytes(&p->va, sizeof *p->va);
 }
 
 bool page_hash_less(const struct hash_elem *a, const struct hash_elem *b, void *aux) {
