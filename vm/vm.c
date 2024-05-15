@@ -59,20 +59,25 @@ err:
 }
 
 /* Find VA from spt and return page. On error, return NULL. */
-struct page *
-spt_find_page(struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
+struct page *spt_find_page(struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
     struct page *page = NULL;
-    /* TODO: Fill this function. */
+    struct page _page;
+    struct hash_elem *hash_elem;
 
+    _page.va = va;
+    hash_elem = hash_find(&spt->spt_hash, &_page.hash_elem);
+    page = hash_entry(hash_elem, struct page, hash_elem);
     return page;
 }
 
 /* Insert PAGE into spt with validation. */
-bool spt_insert_page(struct supplemental_page_table *spt UNUSED,
-                     struct page *page UNUSED) {
+bool spt_insert_page(struct supplemental_page_table *spt UNUSED, struct page *page UNUSED) {
     int succ = false;
-    /* TODO: Fill this function. */
+    struct hash_elem *h_elem;
 
+    h_elem = hash_insert(&spt->spt_hash, &page->hash_elem);
+    if (!h_elem)
+        succ = true;
     return succ;
 }
 
@@ -166,6 +171,7 @@ vm_do_claim_page(struct page *page) {
 
 /* Initialize new supplemental page table */
 void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED) {
+    hash_init(&thread_current()->spt.spt_hash, page_hash_func, page_hash_less, NULL);
 }
 
 /* Copy supplemental page table from src to dst */
@@ -177,4 +183,15 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
     /* TODO: Destroy all the supplemental_page_table hold by thread and
      * TODO: writeback all the modified contents to the storage. */
+}
+
+uint64_t page_hash_func(const struct hash_elem *e, void *aux) {
+    struct page *p = hash_entry(e, struct page, hash_elem);
+    return hash_bytes(p->va, sizeof *p->va);
+}
+
+bool page_hash_less(const struct hash_elem *a, const struct hash_elem *b, void *aux) {
+    struct page *p_a = hash_entry(a, struct page, hash_elem);
+    struct page *p_b = hash_entry(b, struct page, hash_elem);
+    return p_a->va < p_b->va;
 }
