@@ -3,6 +3,9 @@
 #include "vm/vm.h"
 #include "threads/malloc.h"
 #include "vm/inspect.h"
+#include "threads/mmu.h"
+
+struct list frame_list;
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -15,6 +18,7 @@ void vm_init(void) {
     register_inspect_intr();
     /* DO NOT MODIFY UPPER LINES. */
     /* TODO: Your code goes here. */
+    list_init(&frame_list);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -109,10 +113,21 @@ vm_evict_frame(void) {
  * and return it. This always return valid address. That is, if the user pool
  * memory is full, this function evicts the frame to get the available memory
  * space.*/
-static struct frame *
-vm_get_frame(void) {
+static struct frame *vm_get_frame(void) {
     struct frame *frame = NULL;
-    /* TODO: Fill this function. */
+
+    frame = calloc(1, sizeof *frame);
+    if (!frame)
+        PANIC("todo");
+
+    frame->kva = palloc_get_page(PAL_USER | PAL_ZERO);
+    if (!frame->kva) {
+        // victim_frame = vm_evict_frame();
+        // frame->kva = palloc_get_page(PAL_USER);
+        PANIC("todo");
+    }
+
+    list_push_back(&frame_list, &frame->elem);
 
     ASSERT(frame != NULL);
     ASSERT(frame->page == NULL);
@@ -150,14 +165,18 @@ void vm_dealloc_page(struct page *page) {
 /* Claim the page that allocate on VA. */
 bool vm_claim_page(void *va UNUSED) {
     struct page *page = NULL;
+
     /* TODO: Fill this function */
+    page = spt_find_page(&thread_current()->spt, va);
+    if (!page)
+        return false;
 
     return vm_do_claim_page(page);
 }
 
 /* Claim the PAGE and set up the mmu. */
-static bool
-vm_do_claim_page(struct page *page) {
+static bool vm_do_claim_page(struct page *page) {
+    struct thread *curr = thread_current();
     struct frame *frame = vm_get_frame();
 
     /* Set links */
@@ -165,6 +184,8 @@ vm_do_claim_page(struct page *page) {
     page->frame = frame;
 
     /* TODO: Insert page table entry to map page's VA to frame's PA. */
+    if (!pml4_set_page(&curr->pml4, page->va, frame->kva, page->is_writable))
+        return false;
 
     return swap_in(page, frame->kva);
 }
