@@ -57,8 +57,23 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
         /* TODO: Create the page, fetch the initialier according to the VM type,
          * TODO: and then create "uninit" page struct by calling uninit_new. You
          * TODO: should modify the field after calling the uninit_new. */
+        bool (*new_initializer)(struct page *, enum vm_type, void *) = NULL;
+        struct page *newPage = calloc(1, sizeof *newPage);
+        if (!newPage)
+            return false;
+
+        if (VM_TYPE(type) == VM_ANON)
+            new_initializer = anon_initializer;
+        else if (VM_TYPE(type) == VM_FILE)
+            new_initializer = file_backed_initializer;
+
+        uninit_new(newPage, upage, init, type, aux, new_initializer);
+        newPage->is_writable = writable;
 
         /* TODO: Insert the page into the spt. */
+        spt_insert_page(spt, newPage);
+
+        return true;
     }
 err:
     return false;
@@ -70,8 +85,12 @@ struct page *spt_find_page(struct supplemental_page_table *spt UNUSED, void *va 
     struct page _page;
     struct hash_elem *hash_elem;
 
-    _page.va = va;
+    _page.va = pg_round_down(va);
+
     hash_elem = hash_find(&spt->spt_hash, &_page.hash_elem);
+
+    if (!hash_elem)
+        return NULL;
     page = hash_entry(hash_elem, struct page, hash_elem);
     return page;
 }
@@ -147,11 +166,13 @@ vm_handle_wp(struct page *page UNUSED) {
 }
 
 /* Return true on success */
-bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
-                         bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
+bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
     struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
-    struct page *page = NULL;
+    struct page *page = spt_find_page(spt, addr);
     /* TODO: Validate the fault */
+    if (!page)
+        return false; // ㄹㅇ 폴트
+
     /* TODO: Your code goes here */
 
     return vm_do_claim_page(page);
@@ -186,7 +207,7 @@ static bool vm_do_claim_page(struct page *page) {
     page->frame = frame;
 
     /* TODO: Insert page table entry to map page's VA to frame's PA. */
-    if (!pml4_set_page(&curr->pml4, page->va, frame->kva, page->is_writable))
+    if (!pml4_set_page(curr->pml4, page->va, frame->kva, page->is_writable))
         return false;
 
     return swap_in(page, frame->kva);
