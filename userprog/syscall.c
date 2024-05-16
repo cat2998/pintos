@@ -121,7 +121,7 @@ void syscall_handler(struct intr_frame *f UNUSED) {
 }
 
 void check_addr(uint64_t *ptr) {
-    if (ptr == NULL || is_kernel_vaddr(ptr) || !pml4_get_page(thread_current()->pml4, ptr))
+    if (ptr == NULL || is_kernel_vaddr(ptr) || !spt_find_page(&thread_current()->spt, ptr))
         exit(-1);
 }
 
