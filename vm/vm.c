@@ -7,8 +7,6 @@
 
 struct list frame_list;
 
-// #define VA_MASK(va) (((uint64_t)va) & ~0xFFF)
-
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
 void vm_init(void) {
@@ -221,6 +219,29 @@ void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED) {
 /* Copy supplemental page table from src to dst */
 bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
                                   struct supplemental_page_table *src UNUSED) {
+    struct hash_iterator i;
+    hash_first(&i, src);
+    while (hash_next(&i)) {
+        struct page *src_page = hash_entry(hash_cur(&i), struct page, hash_elem);
+        // struct page *dst_page = calloc(1, sizeof *dst_page);
+        // if (!dst_page)
+        //     return false;
+
+        enum vm_type type = src_page->operations->type;
+        if (!vm_alloc_page_with_initializer(src_page->uninit.type, src_page->va, src_page->is_writable, src_page->uninit.init, src_page->uninit.aux))
+            return false;
+
+        if (VM_TYPE(type) != VM_UNINIT) {
+            if (!vm_claim_page(src_page->va))
+                return false;
+        }
+        // src_page->operations->type == anon 이거나 file-back 이라면 frame까지 할당받을 상태라는거 왜냐면
+        // page_fault가 나면(lazy load 방식을 썻기 때문에 page만 있고 frame은 없는 상태)
+        // spt에서 page 가져와, frame 할당받아, 연결해, pml4에도 매핑등록해, swap_in
+        // swap_in 이 되면, uninit_initialize 가 실행될거고,
+        // uninit_initialize 얘는 설정한 page_initializer 이거를 실행할거임 (operations->type이게 바뀐다는거임) 그리고 lazy_loading 을 할거다 (frame에 파일 올림)
+    }
+    return true;
 }
 
 /* Free the resource hold by the supplemental page table */
@@ -231,7 +252,7 @@ void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
 
 uint64_t page_hash_func(const struct hash_elem *e, void *aux) {
     struct page *p = hash_entry(e, struct page, hash_elem);
-    // p->va = VA_MASK(p->va);
+
     return hash_bytes(&p->va, sizeof *p->va);
 }
 

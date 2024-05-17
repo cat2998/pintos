@@ -723,12 +723,12 @@ lazy_load_segment(struct page *page, void *aux) {
     struct lazy_load_aux *llaux = aux;
 
     if (file_read_at(llaux->file, page->frame->kva, llaux->page_read_bytes, llaux->offset) != (int)llaux->page_read_bytes) {
-        free(aux);
+        // free(aux);
         return false;
     }
     memset(page->frame->kva + llaux->page_read_bytes, 0, llaux->page_zero_bytes);
 
-    free(aux);
+    // free(aux);
     return true;
 }
 
@@ -791,8 +791,7 @@ setup_stack(struct intr_frame *if_) {
      * TODO: If success, set the rsp accordingly.
      * TODO: You should mark the page is stack. */
     /* TODO: Your code goes here */
-
-    if (!vm_alloc_page(VM_ANON, stack_bottom, 1))
+    if (!vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, 1))
         return success;
 
     if (!vm_claim_page(stack_bottom)) {

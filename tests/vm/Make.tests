@@ -133,7 +133,7 @@ tests/vm/swap-file.output: MEMORY = 8
 tests/vm/swap-iter.output: SWAP_DISK = 50
 tests/vm/swap-iter.output: TIMEOUT = 180
 tests/vm/swap-iter.output: MEMORY = 10
-tests/vm/swap-fork.output: SWAP_DISK = 200
+tests/vm/swap-fork.output: SWAP_DISK = 100
 tests/vm/swap-fork.output: MEMORY = 40
 tests/vm/swap-fork.output: TIMEOUT = 600
 
