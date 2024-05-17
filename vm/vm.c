@@ -4,8 +4,11 @@
 #include "threads/malloc.h"
 #include "vm/inspect.h"
 #include "threads/mmu.h"
+#include <string.h>
 
 struct list frame_list;
+
+void clear_spt_hash(struct hash_elem *hash_elem, void *aux);
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -168,6 +171,9 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool us
     struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
     struct page *page = spt_find_page(spt, addr);
     /* TODO: Validate the fault */
+    if (!not_present)
+        return false;
+
     if (!page)
         return false; // ㄹㅇ 폴트
 
@@ -220,26 +226,24 @@ void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED) {
 bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
                                   struct supplemental_page_table *src UNUSED) {
     struct hash_iterator i;
-    hash_first(&i, src);
+    hash_first(&i, &src->spt_hash);
     while (hash_next(&i)) {
         struct page *src_page = hash_entry(hash_cur(&i), struct page, hash_elem);
-        // struct page *dst_page = calloc(1, sizeof *dst_page);
-        // if (!dst_page)
-        //     return false;
+        struct page *dst_page;
 
         enum vm_type type = src_page->operations->type;
-        if (!vm_alloc_page_with_initializer(src_page->uninit.type, src_page->va, src_page->is_writable, src_page->uninit.init, src_page->uninit.aux))
-            return false;
 
-        if (VM_TYPE(type) != VM_UNINIT) {
+        if (VM_TYPE(type) == VM_UNINIT) {
+            if (!vm_alloc_page_with_initializer(src_page->uninit.type, src_page->va, src_page->is_writable, src_page->uninit.init, src_page->uninit.aux))
+                return false;
+        } else {
+            if (!vm_alloc_page(src_page->uninit.type, src_page->va, src_page->is_writable))
+                return false;
             if (!vm_claim_page(src_page->va))
                 return false;
+            dst_page = spt_find_page(dst, src_page->va);
+            memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
         }
-        // src_page->operations->type == anon 이거나 file-back 이라면 frame까지 할당받을 상태라는거 왜냐면
-        // page_fault가 나면(lazy load 방식을 썻기 때문에 page만 있고 frame은 없는 상태)
-        // spt에서 page 가져와, frame 할당받아, 연결해, pml4에도 매핑등록해, swap_in
-        // swap_in 이 되면, uninit_initialize 가 실행될거고,
-        // uninit_initialize 얘는 설정한 page_initializer 이거를 실행할거임 (operations->type이게 바뀐다는거임) 그리고 lazy_loading 을 할거다 (frame에 파일 올림)
     }
     return true;
 }
@@ -248,6 +252,13 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED) {
     /* TODO: Destroy all the supplemental_page_table hold by thread and
      * TODO: writeback all the modified contents to the storage. */
+    hash_clear(&spt->spt_hash, clear_spt_hash);
+}
+
+void clear_spt_hash(struct hash_elem *hash_elem, void *aux) {
+    struct page *delete_page = hash_entry(hash_elem, struct page, hash_elem);
+    // if (delete_page)
+    vm_dealloc_page(delete_page);
 }
 
 uint64_t page_hash_func(const struct hash_elem *e, void *aux) {
