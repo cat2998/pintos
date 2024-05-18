@@ -202,10 +202,6 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool us
             return false; // ㄹㅇ 폴트
         }
 
-        if (write == 1 && page->is_writable == 0) {
-            return false;
-        }
-
         return vm_do_claim_page(page); // page찾으면 레이지로딩
     }
 

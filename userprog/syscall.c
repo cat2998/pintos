@@ -127,6 +127,15 @@ void check_addr(uint64_t *ptr) {
         exit(-1);
 }
 
+void check_writable(uint64_t *ptr) {
+    struct page *page = NULL;
+
+    page = spt_find_page(&thread_current()->spt, ptr);
+    ASSERT(page != NULL);
+    if (!page->is_writable)
+        exit(-1);
+}
+
 void exit(int status) {
     thread_current()->exit_status = status;
     printf("%s: exit(%d)\n", thread_current()->name, thread_current()->exit_status);
@@ -283,13 +292,9 @@ int read(int fd, void *buffer, unsigned length) {
     struct file_descriptor *find_fd;
     struct file_descriptor *root_fd;
     int result = -1;
-    // struct page *page;
 
     check_addr(buffer);
-
-    // page = pg_round_down(buffer);
-    // if (!page->is_writable)
-    //     exit(-1);
+    check_writable(buffer);
 
     find_fd = get_fd(fd, &root_fd);
     if (find_fd != NULL) {
@@ -309,13 +314,9 @@ int write(int fd, const void *buffer, unsigned length) {
     struct file_descriptor *find_fd;
     struct file_descriptor *root_fd;
     int result = 0;
-    // struct page *page;
 
     check_addr(buffer);
-
-    // page = pg_round_down(buffer);
-    // if (!page->is_writable)
-    //     exit(-1);
+    check_writable(buffer);
 
     find_fd = get_fd(fd, &root_fd);
     if (find_fd != NULL) {
