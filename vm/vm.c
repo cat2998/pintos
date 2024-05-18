@@ -264,7 +264,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
             if (!vm_alloc_page_with_initializer(src_page->uninit.type, src_page->va, src_page->is_writable, src_page->uninit.init, src_page->uninit.aux))
                 return false;
         } else {
-            if (!vm_alloc_page(src_page->uninit.type, src_page->va, src_page->is_writable))
+            if (!vm_alloc_page(type, src_page->va, src_page->is_writable))
                 return false;
             if (!vm_claim_page(src_page->va))
                 return false;

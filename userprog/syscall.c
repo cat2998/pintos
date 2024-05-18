@@ -316,7 +316,6 @@ int write(int fd, const void *buffer, unsigned length) {
     int result = 0;
 
     check_addr(buffer);
-    check_writable(buffer);
 
     find_fd = get_fd(fd, &root_fd);
     if (find_fd != NULL) {
