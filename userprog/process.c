@@ -800,6 +800,7 @@ setup_stack(struct intr_frame *if_) {
     }
 
     if_->rsp = USER_STACK;
+    thread_current()->stack_bottom = stack_bottom;
     success = true;
     return success;
 }

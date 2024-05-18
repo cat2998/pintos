@@ -69,6 +69,8 @@ void syscall_handler(struct intr_frame *f UNUSED) {
     uint64_t syscall_num = f->R.rax;
     // TODO: Your implementation goes here.
     struct thread *curr = thread_current();
+
+    curr->user_rsp = f->rsp;
     switch (syscall_num) {
     case SYS_HALT:
         power_off(); /* Halt the operating system. */
@@ -281,8 +283,13 @@ int read(int fd, void *buffer, unsigned length) {
     struct file_descriptor *find_fd;
     struct file_descriptor *root_fd;
     int result = -1;
+    // struct page *page;
 
     check_addr(buffer);
+
+    // page = pg_round_down(buffer);
+    // if (!page->is_writable)
+    //     exit(-1);
 
     find_fd = get_fd(fd, &root_fd);
     if (find_fd != NULL) {
@@ -302,8 +309,13 @@ int write(int fd, const void *buffer, unsigned length) {
     struct file_descriptor *find_fd;
     struct file_descriptor *root_fd;
     int result = 0;
+    // struct page *page;
 
     check_addr(buffer);
+
+    // page = pg_round_down(buffer);
+    // if (!page->is_writable)
+    //     exit(-1);
 
     find_fd = get_fd(fd, &root_fd);
     if (find_fd != NULL) {
