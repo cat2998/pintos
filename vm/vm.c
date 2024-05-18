@@ -159,6 +159,18 @@ static struct frame *vm_get_frame(void) {
 /* Growing the stack. */
 static void
 vm_stack_growth(void *addr UNUSED) {
+    void *stack_bottom = thread_current()->stack_bottom;
+
+    while (stack_bottom > addr) {
+        stack_bottom = (void *)(((uint8_t *)stack_bottom) - PGSIZE);
+
+        if (!vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, 1))
+            return;
+
+        if (!vm_claim_page(stack_bottom))
+            return;
+    }
+    thread_current()->stack_bottom = stack_bottom;
 }
 
 /* Handle the fault on write_protected page */
@@ -169,17 +181,32 @@ vm_handle_wp(struct page *page UNUSED) {
 /* Return true on success */
 bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
     struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
-    struct page *page = spt_find_page(spt, addr);
+    struct page *page = NULL;
     /* TODO: Validate the fault */
-    if (!not_present)
-        return false;
 
-    if (!page)
-        return false; // ㄹㅇ 폴트
+    if (not_present) { // frame없어
+
+        if (thread_current()->stack_bottom > addr && addr > USER_STACK - (1 << 20)) { // Are you stack? page 없어?
+            void *user_rsp = thread_current()->user_rsp;
+            if (user)
+                user_rsp = f->rsp;
+            if (user_rsp == addr || user_rsp - 8 == addr) {
+                vm_stack_growth(addr);
+                return true;
+            }
+            return false;
+        }
+
+        page = spt_find_page(spt, addr);
+        if (!page) {      // page 없어, frame 없어
+            return false; // ㄹㅇ 폴트
+        }
+
+        return vm_do_claim_page(page); // page찾으면 레이지로딩
+    }
 
     /* TODO: Your code goes here */
-
-    return vm_do_claim_page(page);
+    return false;
 }
 
 /* Free the page.
@@ -237,7 +264,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
             if (!vm_alloc_page_with_initializer(src_page->uninit.type, src_page->va, src_page->is_writable, src_page->uninit.init, src_page->uninit.aux))
                 return false;
         } else {
-            if (!vm_alloc_page(src_page->uninit.type, src_page->va, src_page->is_writable))
+            if (!vm_alloc_page(type, src_page->va, src_page->is_writable))
                 return false;
             if (!vm_claim_page(src_page->va))
                 return false;

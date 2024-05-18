@@ -69,6 +69,8 @@ void syscall_handler(struct intr_frame *f UNUSED) {
     uint64_t syscall_num = f->R.rax;
     // TODO: Your implementation goes here.
     struct thread *curr = thread_current();
+
+    curr->user_rsp = f->rsp;
     switch (syscall_num) {
     case SYS_HALT:
         power_off(); /* Halt the operating system. */
@@ -122,6 +124,15 @@ void syscall_handler(struct intr_frame *f UNUSED) {
 
 void check_addr(uint64_t *ptr) {
     if (ptr == NULL || is_kernel_vaddr(ptr) || !spt_find_page(&thread_current()->spt, ptr))
+        exit(-1);
+}
+
+void check_writable(uint64_t *ptr) {
+    struct page *page = NULL;
+
+    page = spt_find_page(&thread_current()->spt, ptr);
+    ASSERT(page != NULL);
+    if (!page->is_writable)
         exit(-1);
 }
 
@@ -283,6 +294,7 @@ int read(int fd, void *buffer, unsigned length) {
     int result = -1;
 
     check_addr(buffer);
+    check_writable(buffer);
 
     find_fd = get_fd(fd, &root_fd);
     if (find_fd != NULL) {
