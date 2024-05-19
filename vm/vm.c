@@ -146,6 +146,7 @@ static struct frame *vm_get_frame(void) {
     if (!frame->kva) {
         // victim_frame = vm_evict_frame();
         // frame->kva = palloc_get_page(PAL_USER);
+        free(frame);
         PANIC("todo");
     }
 

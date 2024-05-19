@@ -31,13 +31,6 @@ static void initd(void *f_name);
 static void __do_fork(void *);
 extern struct lock file_lock;
 
-struct lazy_load_aux {
-    struct file *file;
-    off_t offset;
-    size_t page_read_bytes;
-    size_t page_zero_bytes;
-};
-
 /* General process initializer for initd and other process. */
 static void
 process_init(void) {
@@ -726,7 +719,7 @@ lazy_load_segment(struct page *page, void *aux) {
         // free(aux);
         return false;
     }
-    memset(page->frame->kva + llaux->page_read_bytes, 0, llaux->page_zero_bytes);
+    // memset(page->frame->kva + llaux->page_read_bytes, 0, llaux->page_zero_bytes);
 
     // free(aux);
     return true;
