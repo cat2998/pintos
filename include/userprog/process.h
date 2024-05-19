@@ -33,9 +33,9 @@ int fd_list_init(void);
 struct lazy_load_aux {
     struct file *file;
     off_t offset;
+    size_t total_read_bytes;
     size_t page_read_bytes;
     size_t page_zero_bytes;
-    void *mmap_addr;
 };
 
 #endif /* userprog/process.h */

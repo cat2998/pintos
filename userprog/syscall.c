@@ -400,12 +400,11 @@ void *mmap(void *addr, size_t length, int writable, int fd, off_t offset) {
 
     find_file = find_fd->file;
 
-    if (spt_find_page(&thread_current()->spt, pg_round_down(addr + length))) {
-        return NULL;
-    }
-    if (!find_file || addr == NULL || is_kernel_vaddr(addr) || length == 0)
+    if (!find_file || addr == NULL || is_kernel_vaddr(addr) || length == 0 || pg_ofs(addr) != 0)
         return NULL;
 
+    if (spt_find_page(&thread_current()->spt, pg_round_down(addr + length)))
+        return NULL;
     if (find_fd->_stdin || find_fd->_stdout || find_fd->_stderr)
         return NULL;
 
