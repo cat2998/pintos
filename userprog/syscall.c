@@ -398,20 +398,23 @@ void *mmap(void *addr, size_t length, int writable, int fd, off_t offset) {
     if (!find_fd)
         return NULL;
 
-    find_file = find_fd->file;
-
-    if (!find_file || addr == NULL || is_kernel_vaddr(addr) || length == 0 || pg_ofs(addr) != 0)
+    if (addr == NULL || is_kernel_vaddr(addr) || length == 0 || pg_ofs(addr) != 0)
         return NULL;
 
-    if (spt_find_page(&thread_current()->spt, pg_round_down(addr + length)))
+    if (spt_find_page(&thread_current()->spt, addr + length))
         return NULL;
+
     if (find_fd->_stdin || find_fd->_stdout || find_fd->_stderr)
+        return NULL;
+    
+    find_file = file_reopen(find_fd->file);
+    if (!find_file)
         return NULL;
 
     return do_mmap(addr, length, writable, find_file, offset);
 }
+
 void munmap(void *addr) {
     check_addr(addr);
-
     do_munmap(addr);
 }

@@ -9,6 +9,8 @@ static bool file_backed_swap_in(struct page *page, void *kva);
 static bool file_backed_swap_out(struct page *page);
 static void file_backed_destroy(struct page *page);
 bool lazy_load_file_back(struct page *page, void *aux);
+void delete_frame(struct frame *frame);
+
 /* DO NOT MODIFY this struct */
 static const struct page_operations file_ops = {
     .swap_in = file_backed_swap_in,
@@ -44,17 +46,17 @@ file_backed_swap_out(struct page *page) {
 /* Destory the file backed page. PAGE will be freed by the caller. */
 static void
 file_backed_destroy(struct page *page) {
-
+    struct thread *curr = thread_current();
     struct file_page *file_page = &page->file;
 
-    if (pml4_is_dirty(thread_current()->pml4, page->va)) {
+    if (pml4_is_dirty(curr->pml4, page->va))
         file_write_at(file_page->file, page->frame->kva, file_page->page_read_bytes, file_page->ofs);
-    }
-    // pml4_clear_page(thread_current()->pml4, page->va);
-    // if (page->frame) {
-    //     delete_frame(page->frame->kva);
-    // }
-    // hash_delete(&thread->spt.spt_hash, &page->hash_elem);
+
+    if (page->frame)
+        delete_frame(page->frame);
+    hash_delete(&curr->spt.spt_hash, &page->hash_elem);
+
+    pml4_clear_page(curr->pml4, page->va);
 }
 
 /* Do the mmap */
@@ -63,13 +65,9 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file, off_t 
     void *upage = addr;
 
     while (total_read_bytes > 0) {
-        /* Do calculate how to fill this page.
-         * We will read PAGE_READ_BYTES bytes from FILE
-         * and zero the final PAGE_ZERO_BYTES bytes. */
         size_t page_read_bytes = total_read_bytes < PGSIZE ? total_read_bytes : PGSIZE;
         size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-        /* TODO: Set up aux to pass information to the lazy_load_segment. */
         struct lazy_load_aux *aux = calloc(1, sizeof(struct lazy_load_aux));
         *aux = (struct lazy_load_aux){
             .file = file,
@@ -82,7 +80,6 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file, off_t 
         if (!vm_alloc_page_with_initializer(VM_FILE, upage, writable, lazy_load_file_back, (void *)aux))
             return false;
 
-        /* Advance. */
         total_read_bytes -= page_read_bytes;
         offset += page_read_bytes;
         upage += PGSIZE;
@@ -94,44 +91,32 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file, off_t 
 void do_munmap(void *addr) {
     struct thread *thread = thread_current();
     struct page *page = spt_find_page(&thread->spt, addr);
+    struct file *file = page->file.file;
 
     size_t total_read_bytes = page->file.total_read_bytes;
-    off_t offset = 0;
+    off_t offset = page->file.ofs;
 
     ASSERT(pg_ofs(addr) == 0);
     while (total_read_bytes > 0) {
         page = spt_find_page(&thread->spt, addr);
-        if (pml4_is_dirty(thread->pml4, addr))
+        if (pml4_is_dirty(thread->pml4, addr)) {
             file_write_at(page->file.file, page->frame->kva, page->file.page_read_bytes, offset);
+            pml4_set_dirty(thread->pml4, addr, 0);
+        }
 
         addr += PGSIZE;
         offset += page->file.page_read_bytes;
         total_read_bytes -= page->file.page_read_bytes;
 
-        if (page->frame) {
-            // pml4 매핑정보도 없애야하는거 아님?
-            delete_frame(page->frame->kva);
-            // destroy에서 frame, 매핑정보 없애는 흐름이라면 이 if 문 없어도 될듯. vm_dealloc_page()->destroy() 호출하니까
-        }
-
-        hash_delete(&thread->spt.spt_hash, &page->hash_elem);
         vm_dealloc_page(page);
     }
+    file_close(file);
 }
 
-void delete_frame(void *kva) {
-    struct list_elem *e;
-    struct list_elem *ed;
-    struct frame *frame = NULL;
-    for (e = list_begin(&frame_list); e != list_end(&frame_list); e = list_next(e)) {
-        frame = list_entry(e, struct frame, elem);
-        if (frame->kva == kva) {
-            e = list_remove(e);
-            palloc_free_page(frame->kva);
-            free(frame);
-            break;
-        }
-    }
+void delete_frame(struct frame *frame) {
+    list_remove(&frame->elem);
+    palloc_free_page(frame->kva);
+    free(frame);
 }
 
 bool lazy_load_file_back(struct page *page, void *aux) {
@@ -149,4 +134,4 @@ bool lazy_load_file_back(struct page *page, void *aux) {
     page->file.page_read_bytes = llaux->page_read_bytes;
     page->file.ofs = llaux->offset;
     return true;
-} 
+}
