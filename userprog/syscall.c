@@ -401,7 +401,7 @@ void *mmap(void *addr, size_t length, int writable, int fd, off_t offset) {
     if (addr == NULL || is_kernel_vaddr(addr) || length == 0 || pg_ofs(addr) != 0)
         return NULL;
 
-    if (spt_find_page(&thread_current()->spt, addr + length))
+    if (spt_find_page(&thread_current()->spt, addr) || spt_find_page(&thread_current()->spt, addr + length))
         return NULL;
 
     if (find_fd->_stdin || find_fd->_stdout || find_fd->_stderr)
