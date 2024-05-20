@@ -66,7 +66,6 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file, off_t 
 
     while (total_read_bytes > 0) {
         size_t page_read_bytes = total_read_bytes < PGSIZE ? total_read_bytes : PGSIZE;
-        size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
         struct lazy_load_aux *aux = calloc(1, sizeof(struct lazy_load_aux));
         *aux = (struct lazy_load_aux){
@@ -88,14 +87,14 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file, off_t 
 
 /* Do the munmap */
 void do_munmap(void *addr) {
+    ASSERT(pg_ofs(addr) == 0);
+
     struct thread *thread = thread_current();
     struct page *page = spt_find_page(&thread->spt, addr);
     struct file *file = page->file.file;
-
     size_t total_read_bytes = page->file.total_read_bytes;
     off_t offset = page->file.ofs;
 
-    ASSERT(pg_ofs(addr) == 0);
     while (total_read_bytes > 0) {
         page = spt_find_page(&thread->spt, addr);
         if (pml4_is_dirty(thread->pml4, addr)) {

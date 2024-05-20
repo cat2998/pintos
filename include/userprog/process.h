@@ -35,7 +35,6 @@ struct lazy_load_aux {
     off_t offset;
     size_t total_read_bytes;
     size_t page_read_bytes;
-    size_t page_zero_bytes;
 };
 
 #endif /* userprog/process.h */

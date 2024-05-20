@@ -719,7 +719,6 @@ lazy_load_segment(struct page *page, void *aux) {
         // free(aux);
         return false;
     }
-    // memset(page->frame->kva + llaux->page_read_bytes, 0, llaux->page_zero_bytes);
 
     // free(aux);
     return true;
@@ -759,13 +758,11 @@ load_segment(struct file *file, off_t ofs, uint8_t *upage,
             .file = file,
             .offset = ofs,
             .page_read_bytes = page_read_bytes,
-            .page_zero_bytes = page_zero_bytes,
         };
 
         if (!vm_alloc_page_with_initializer(VM_ANON, upage, writable, lazy_load_segment, (void *)aux))
             return false;
 
-        /* Advance. */
         read_bytes -= page_read_bytes;
         zero_bytes -= page_zero_bytes;
         ofs += page_read_bytes;
