@@ -61,7 +61,7 @@ file_backed_destroy(struct page *page) {
 
 /* Do the mmap */
 void *do_mmap(void *addr, size_t length, int writable, struct file *file, off_t offset) {
-    size_t total_read_bytes = length;
+    size_t total_read_bytes = file_length(file) < length ? file_length(file) : length;
     void *upage = addr;
 
     while (total_read_bytes > 0) {
@@ -73,7 +73,6 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file, off_t 
             .file = file,
             .offset = offset,
             .page_read_bytes = page_read_bytes,
-            .page_zero_bytes = page_zero_bytes,
             .total_read_bytes = total_read_bytes,
         };
 
@@ -84,7 +83,7 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file, off_t 
         offset += page_read_bytes;
         upage += PGSIZE;
     }
-    return upage;
+    return addr;
 }
 
 /* Do the munmap */
@@ -126,9 +125,10 @@ bool lazy_load_file_back(struct page *page, void *aux) {
 
     /* Load this page. */
     struct lazy_load_aux *llaux = aux;
-    if (file_read_at(llaux->file, page->frame->kva, llaux->page_read_bytes, llaux->offset) != (int)llaux->page_read_bytes) {
+
+    if (file_read_at(llaux->file, page->frame->kva, llaux->page_read_bytes, llaux->offset) != (int)llaux->page_read_bytes)
         return false;
-    }
+
     page->file.file = llaux->file;
     page->file.total_read_bytes = llaux->total_read_bytes;
     page->file.page_read_bytes = llaux->page_read_bytes;
