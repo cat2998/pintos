@@ -4,6 +4,7 @@
 #include "threads/vaddr.h"
 #include "userprog/process.h"
 #include "threads/mmu.h"
+#include "string.h"
 
 static bool file_backed_swap_in(struct page *page, void *kva);
 static bool file_backed_swap_out(struct page *page);
@@ -36,12 +37,29 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva) {
 static bool
 file_backed_swap_in(struct page *page, void *kva) {
     struct file_page *file_page UNUSED = &page->file;
+    if (file_read_at(file_page->file, kva, file_page->page_read_bytes, file_page->ofs) != (int)file_page->page_read_bytes)
+        return false;
+    return true;
 }
 
 /* Swap out the page by writeback contents to the file. */
 static bool
 file_backed_swap_out(struct page *page) {
     struct file_page *file_page UNUSED = &page->file;
+    struct thread *curr = thread_current();
+
+    lock_acquire(&file_lock);
+    if (pml4_is_dirty(curr->pml4, page->va)) {
+        if (file_write_at(file_page->file, page->frame->kva, file_page->page_read_bytes, file_page->ofs) != file_page->page_read_bytes) {
+            lock_release(&file_lock);
+            return false;
+        }
+        pml4_set_dirty(curr->pml4, page->va, 0);
+    }
+    lock_release(&file_lock);
+
+    pml4_clear_page(curr->pml4, page->va);
+    return true;
 }
 
 /* Destory the file backed page. PAGE will be freed by the caller. */
@@ -51,8 +69,10 @@ file_backed_destroy(struct page *page) {
     struct file_page *file_page = &page->file;
 
     lock_acquire(&file_lock);
-    if (pml4_is_dirty(curr->pml4, page->va))
+    if (pml4_is_dirty(curr->pml4, page->va)) {
         file_write_at(file_page->file, page->frame->kva, file_page->page_read_bytes, file_page->ofs);
+        pml4_set_dirty(curr->pml4, page->va, 0);
+    }
     lock_release(&file_lock);
 
     if (page->frame)
@@ -121,6 +141,8 @@ void do_munmap(void *addr) {
 void delete_frame(struct frame *frame) {
     lock_acquire(&frame_lock);
     list_remove(&frame->elem);
+    frame->page->frame = NULL;
+    frame->page = NULL;
     palloc_free_page(frame->kva);
     free(frame);
     lock_release(&frame_lock);

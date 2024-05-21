@@ -118,7 +118,19 @@ void spt_remove_page(struct supplemental_page_table *spt, struct page *page) {
 static struct frame *
 vm_get_victim(void) {
     struct frame *victim = NULL;
+    struct list_elem *e;
     /* TODO: The policy for eviction is up to you. */
+
+    lock_acquire(&frame_lock);
+    for (e = list_begin(&frame_list); e != list_end(&frame_list); e = list_next(e)) {
+        victim = list_entry(e, struct frame, elem);
+        if (!pml4_is_accessed(thread_current()->pml4, victim->page->va)) {
+            return victim;
+        }
+        pml4_set_accessed(thread_current()->pml4, victim->page->va, false);
+    }
+    victim = list_entry(list_begin(&frame_list), struct frame, elem);
+    lock_release(&frame_lock);
 
     return victim;
 }
@@ -127,10 +139,14 @@ vm_get_victim(void) {
  * Return NULL on error.*/
 static struct frame *
 vm_evict_frame(void) {
-    struct frame *victim UNUSED = vm_get_victim();
+    struct frame *victim = vm_get_victim();
     /* TODO: swap out the victim and return the evicted frame. */
-
-    return NULL;
+    if (!swap_out(victim->page))
+        return NULL;
+    list_remove(&victim->elem);
+    memset(victim->kva, 0, PGSIZE);
+    victim->page = NULL;
+    return victim;
 }
 
 /* palloc() and get frame. If there is no available page, evict the page
@@ -140,22 +156,18 @@ vm_evict_frame(void) {
 static struct frame *vm_get_frame(void) {
     struct frame *frame = NULL;
 
-    lock_acquire(&frame_lock);
-
     frame = calloc(1, sizeof *frame);
     if (!frame)
         PANIC("todo");
 
     frame->kva = palloc_get_page(PAL_USER | PAL_ZERO);
     if (!frame->kva) {
-        // victim_frame = vm_evict_frame();
-        // frame->kva = palloc_get_page(PAL_USER);
-        free(frame);
-        PANIC("todo");
+        // free(frame);
+        frame = vm_evict_frame();
     }
 
+    lock_acquire(&frame_lock);
     list_push_back(&frame_list, &frame->elem);
-
     lock_release(&frame_lock);
 
     ASSERT(frame != NULL);
