@@ -31,13 +31,6 @@ static void initd(void *f_name);
 static void __do_fork(void *);
 extern struct lock file_lock;
 
-struct lazy_load_aux {
-    struct file *file;
-    off_t offset;
-    size_t page_read_bytes;
-    size_t page_zero_bytes;
-};
-
 /* General process initializer for initd and other process. */
 static void
 process_init(void) {
@@ -335,7 +328,9 @@ void process_exit(void) {
                 }
             }
             e = list_remove(e);
+            lock_acquire(&file_lock);
             file_close(fd->file);
+            lock_release(&file_lock);
             free(fd);
         }
     }
@@ -357,7 +352,9 @@ process_cleanup(void) {
     struct thread *curr = thread_current();
 
     if (curr->exec_file != NULL) {
+        lock_acquire(&file_lock);
         file_close(curr->exec_file);
+        lock_release(&file_lock);
         curr->exec_file = NULL;
     }
 
@@ -478,7 +475,7 @@ load(const char *file_name, struct intr_frame *if_) {
     /* Open executable file. */
     lock_acquire(&file_lock);
     file = filesys_open(file_name);
-    lock_release(&file_lock);
+
     if (file == NULL) {
         printf("load: %s: open failed\n", file_name);
         goto done;
@@ -559,10 +556,12 @@ load(const char *file_name, struct intr_frame *if_) {
 done:
     /* We arrive here whether the load is successful or not. */
     if (success) {
+        lock_release(&file_lock);
         t->exec_file = file;
         return success;
     }
     file_close(file);
+    lock_release(&file_lock);
     return success;
 }
 
@@ -726,7 +725,6 @@ lazy_load_segment(struct page *page, void *aux) {
         // free(aux);
         return false;
     }
-    memset(page->frame->kva + llaux->page_read_bytes, 0, llaux->page_zero_bytes);
 
     // free(aux);
     return true;
@@ -766,13 +764,11 @@ load_segment(struct file *file, off_t ofs, uint8_t *upage,
             .file = file,
             .offset = ofs,
             .page_read_bytes = page_read_bytes,
-            .page_zero_bytes = page_zero_bytes,
         };
 
         if (!vm_alloc_page_with_initializer(VM_ANON, upage, writable, lazy_load_segment, (void *)aux))
             return false;
 
-        /* Advance. */
         read_bytes -= page_read_bytes;
         zero_bytes -= page_zero_bytes;
         ofs += page_read_bytes;

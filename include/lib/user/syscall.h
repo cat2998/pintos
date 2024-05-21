@@ -7,7 +7,7 @@
 
 /* Process identifier. */
 typedef int pid_t;
-#define PID_ERROR ((pid_t)-1)
+#define PID_ERROR ((pid_t) - 1)
 
 /* Map region identifier. */
 typedef int off_t;
@@ -39,8 +39,7 @@ void close(int fd);
 int dup2(int oldfd, int newfd);
 
 /* Project 3 and optionally project 4. */
-void *mmap(void *addr, size_t length, int writable, int fd, off_t offset);
-void munmap(void *addr);
+// void *mmap(void *addr, size_t length, int writable, int fd, off_t offset);
 
 /* Project 4 only. */
 bool chdir(const char *dir);

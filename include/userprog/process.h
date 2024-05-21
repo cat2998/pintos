@@ -30,4 +30,11 @@ struct file_descriptor *get_fd(int fd, struct file_descriptor **root);
 struct thread *get_child(tid_t child_pid);
 int fd_list_init(void);
 
+struct lazy_load_aux {
+    struct file *file;
+    off_t offset;
+    size_t total_read_bytes;
+    size_t page_read_bytes;
+};
+
 #endif /* userprog/process.h */
