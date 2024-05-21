@@ -406,8 +406,10 @@ void *mmap(void *addr, size_t length, int writable, int fd, off_t offset) {
 
     if (find_fd->_stdin || find_fd->_stdout || find_fd->_stderr)
         return NULL;
-    
+
+    lock_acquire(&file_lock);
     find_file = file_reopen(find_fd->file);
+    lock_release(&file_lock);
     if (!find_file)
         return NULL;
 

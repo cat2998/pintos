@@ -7,6 +7,7 @@
 #include <string.h>
 
 struct list frame_list;
+struct lock frame_lock;
 
 void clear_spt_hash(struct hash_elem *hash_elem, void *aux);
 
@@ -22,6 +23,7 @@ void vm_init(void) {
     /* DO NOT MODIFY UPPER LINES. */
     /* TODO: Your code goes here. */
     list_init(&frame_list);
+    lock_init(&frame_lock);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -138,6 +140,8 @@ vm_evict_frame(void) {
 static struct frame *vm_get_frame(void) {
     struct frame *frame = NULL;
 
+    lock_acquire(&frame_lock);
+
     frame = calloc(1, sizeof *frame);
     if (!frame)
         PANIC("todo");
@@ -151,6 +155,8 @@ static struct frame *vm_get_frame(void) {
     }
 
     list_push_back(&frame_list, &frame->elem);
+
+    lock_release(&frame_lock);
 
     ASSERT(frame != NULL);
     ASSERT(frame->page == NULL);

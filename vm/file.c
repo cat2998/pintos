@@ -10,6 +10,7 @@ static bool file_backed_swap_out(struct page *page);
 static void file_backed_destroy(struct page *page);
 bool lazy_load_file_back(struct page *page, void *aux);
 void delete_frame(struct frame *frame);
+extern struct lock file_lock;
 
 /* DO NOT MODIFY this struct */
 static const struct page_operations file_ops = {
@@ -49,8 +50,10 @@ file_backed_destroy(struct page *page) {
     struct thread *curr = thread_current();
     struct file_page *file_page = &page->file;
 
+    lock_acquire(&file_lock);
     if (pml4_is_dirty(curr->pml4, page->va))
         file_write_at(file_page->file, page->frame->kva, file_page->page_read_bytes, file_page->ofs);
+    lock_release(&file_lock);
 
     if (page->frame)
         delete_frame(page->frame);
@@ -98,7 +101,9 @@ void do_munmap(void *addr) {
     while (total_read_bytes > 0) {
         page = spt_find_page(&thread->spt, addr);
         if (pml4_is_dirty(thread->pml4, addr)) {
+            lock_acquire(&file_lock);
             file_write_at(page->file.file, page->frame->kva, page->file.page_read_bytes, offset);
+            lock_release(&file_lock);
             pml4_set_dirty(thread->pml4, addr, 0);
         }
 
@@ -108,13 +113,17 @@ void do_munmap(void *addr) {
 
         vm_dealloc_page(page);
     }
+    lock_acquire(&file_lock);
     file_close(file);
+    lock_release(&file_lock);
 }
 
 void delete_frame(struct frame *frame) {
+    lock_acquire(&frame_lock);
     list_remove(&frame->elem);
     palloc_free_page(frame->kva);
     free(frame);
+    lock_release(&frame_lock);
 }
 
 bool lazy_load_file_back(struct page *page, void *aux) {
