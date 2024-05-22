@@ -63,8 +63,8 @@ anon_swap_in(struct page *page, void *kva) {
         disk_read(swap_disk, anon_page->sec_no + i, kva + i * DISK_SECTOR_SIZE);
         bitmap_set(swap_table, anon_page->sec_no + i, 0);
     }
-    anon_page->sec_no = -1;
     lock_release(&swap_lock);
+    anon_page->sec_no = -1;
 
     return true;
 }
@@ -82,15 +82,22 @@ anon_swap_out(struct page *page) {
         disk_write(swap_disk, sec_no + i, page->frame->kva + i * DISK_SECTOR_SIZE);
         bitmap_set(swap_table, sec_no + i, 1);
     }
-    anon_page->sec_no = sec_no;
-    pml4_clear_page(thread_current()->pml4, page->va);
     lock_release(&swap_lock);
+
+    anon_page->sec_no = sec_no;
+    page->frame->page = NULL;
+    page->frame = NULL;
+    pml4_clear_page(thread_current()->pml4, page->va);
 
     return true;
 }
 
 size_t find_disk_sec_no(void) {
-    return bitmap_scan(swap_table, 0, 8, 0);
+    size_t sec_no;
+    lock_acquire(&swap_lock);
+    sec_no = bitmap_scan(swap_table, 0, 8, 0);
+    lock_release(&swap_lock);
+    return sec_no;
 }
 
 /* Destroy the anonymous page. PAGE will be freed by the caller. */
@@ -102,13 +109,15 @@ anon_destroy(struct page *page) {
     if (anon_page->sec_no != -1) {
         lock_acquire(&swap_lock);
         // disk_write(swap_disk,anon_page->sec_no);
-        bitmap_set(swap_table, anon_page->sec_no, 0);
+        for (int i = 0; i < 8; i++)
+            bitmap_set(swap_table, anon_page->sec_no + i, 0);
         lock_release(&swap_lock);
     }
 
-    // if (page->frame)
-    //     delete_frame(page->frame);
-    hash_delete(&curr->spt.spt_hash, &page->hash_elem);
+    // pml4_clear_page(curr->pml4, page->va);
+    if (page->frame)
+        delete_frame(page->frame);
 
-    pml4_clear_page(curr->pml4, page->va);
+    // free(page->uninit.aux);
+    hash_delete(&curr->spt.spt_hash, &page->hash_elem);
 }

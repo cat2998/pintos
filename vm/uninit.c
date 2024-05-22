@@ -62,6 +62,7 @@ uninit_destroy(struct page *page) {
     /* TODO: Fill this function.
      * TODO: If you don't have anything to do, just return. */
     struct thread *curr = thread_current();
+    // free(page->uninit.aux);
     hash_delete(&curr->spt.spt_hash, &page->hash_elem);
     return;
 }

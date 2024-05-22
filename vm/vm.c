@@ -144,7 +144,11 @@ vm_evict_frame(void) {
     /* TODO: swap out the victim and return the evicted frame. */
     if (!swap_out(victim->page))
         return NULL;
+
+    lock_acquire(&frame_lock);
     list_remove(&victim->elem);
+    lock_release(&frame_lock);
+
     memset(victim->kva, 0, PGSIZE);
     victim->page = NULL;
     return victim;
@@ -163,7 +167,7 @@ static struct frame *vm_get_frame(void) {
 
     frame->kva = palloc_get_page(PAL_USER | PAL_ZERO);
     if (!frame->kva) {
-        // free(frame);
+        free(frame);
         frame = vm_evict_frame();
     }
 
@@ -321,13 +325,13 @@ bool page_hash_less(const struct hash_elem *a, const struct hash_elem *b, void *
 }
 
 void delete_frame(struct frame *frame) {
-    // lock_acquire(&frame_lock);
     ASSERT(frame != NULL);
-    list_remove(&frame->elem);
     ASSERT(frame->page != NULL);
+    lock_acquire(&frame_lock);
+    list_remove(&frame->elem);
+    lock_release(&frame_lock);
     frame->page->frame = NULL;
     frame->page = NULL;
-    palloc_free_page(frame->kva);
+    // palloc_free_page(frame->kva);
     free(frame);
-    // lock_release(&frame_lock);
 }

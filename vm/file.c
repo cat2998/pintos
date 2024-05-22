@@ -57,6 +57,8 @@ file_backed_swap_out(struct page *page) {
     }
     lock_release(&file_lock);
 
+    // page->frame->page = NULL;
+    // page->frame = NULL;
     pml4_clear_page(curr->pml4, page->va);
     return true;
 }
@@ -74,11 +76,12 @@ file_backed_destroy(struct page *page) {
     }
     lock_release(&file_lock);
 
+    // pml4_clear_page(curr->pml4, page->va);
     if (page->frame)
         delete_frame(page->frame);
-    hash_delete(&curr->spt.spt_hash, &page->hash_elem);
 
-    pml4_clear_page(curr->pml4, page->va);
+    // free(page->uninit.aux);
+    hash_delete(&curr->spt.spt_hash, &page->hash_elem);
 }
 
 /* Do the mmap */
