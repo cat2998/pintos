@@ -125,6 +125,7 @@ vm_get_victim(void) {
     for (e = list_begin(&frame_list); e != list_end(&frame_list); e = list_next(e)) {
         victim = list_entry(e, struct frame, elem);
         if (!pml4_is_accessed(thread_current()->pml4, victim->page->va)) {
+            lock_release(&frame_lock);
             return victim;
         }
         pml4_set_accessed(thread_current()->pml4, victim->page->va, false);
@@ -317,4 +318,16 @@ bool page_hash_less(const struct hash_elem *a, const struct hash_elem *b, void *
     struct page *p_a = hash_entry(a, struct page, hash_elem);
     struct page *p_b = hash_entry(b, struct page, hash_elem);
     return p_a->va < p_b->va;
+}
+
+void delete_frame(struct frame *frame) {
+    // lock_acquire(&frame_lock);
+    ASSERT(frame != NULL);
+    list_remove(&frame->elem);
+    ASSERT(frame->page != NULL);
+    frame->page->frame = NULL;
+    frame->page = NULL;
+    palloc_free_page(frame->kva);
+    free(frame);
+    // lock_release(&frame_lock);
 }

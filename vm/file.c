@@ -10,7 +10,6 @@ static bool file_backed_swap_in(struct page *page, void *kva);
 static bool file_backed_swap_out(struct page *page);
 static void file_backed_destroy(struct page *page);
 bool lazy_load_file_back(struct page *page, void *aux);
-void delete_frame(struct frame *frame);
 extern struct lock file_lock;
 
 /* DO NOT MODIFY this struct */
@@ -136,16 +135,6 @@ void do_munmap(void *addr) {
     lock_acquire(&file_lock);
     file_close(file);
     lock_release(&file_lock);
-}
-
-void delete_frame(struct frame *frame) {
-    lock_acquire(&frame_lock);
-    list_remove(&frame->elem);
-    frame->page->frame = NULL;
-    frame->page = NULL;
-    palloc_free_page(frame->kva);
-    free(frame);
-    lock_release(&frame_lock);
 }
 
 bool lazy_load_file_back(struct page *page, void *aux) {

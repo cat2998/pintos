@@ -114,6 +114,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
 void vm_dealloc_page(struct page *page);
 bool vm_claim_page(void *va);
 enum vm_type page_get_type(struct page *page);
+void delete_frame(struct frame *frame);
 
 uint64_t page_hash_func(const struct hash_elem *e, void *aux);
 bool page_hash_less(const struct hash_elem *a, const struct hash_elem *b, void *aux);
