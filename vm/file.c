@@ -4,12 +4,12 @@
 #include "threads/vaddr.h"
 #include "userprog/process.h"
 #include "threads/mmu.h"
+#include "string.h"
 
 static bool file_backed_swap_in(struct page *page, void *kva);
 static bool file_backed_swap_out(struct page *page);
 static void file_backed_destroy(struct page *page);
 bool lazy_load_file_back(struct page *page, void *aux);
-void delete_frame(struct frame *frame);
 extern struct lock file_lock;
 
 /* DO NOT MODIFY this struct */
@@ -36,12 +36,33 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva) {
 static bool
 file_backed_swap_in(struct page *page, void *kva) {
     struct file_page *file_page UNUSED = &page->file;
+    if (!file_page->file) 
+        return true;
+    if (file_read_at(file_page->file, kva, file_page->page_read_bytes, file_page->ofs) != (int)file_page->page_read_bytes)
+        return false;
+    return true;
 }
 
 /* Swap out the page by writeback contents to the file. */
 static bool
 file_backed_swap_out(struct page *page) {
     struct file_page *file_page UNUSED = &page->file;
+    struct thread *curr = thread_current();
+
+    lock_acquire(&file_lock);
+    if (pml4_is_dirty(curr->pml4, page->va)) {
+        if (file_write_at(file_page->file, page->frame->kva, file_page->page_read_bytes, file_page->ofs) != file_page->page_read_bytes) {
+            lock_release(&file_lock);
+            return false;
+        }
+        pml4_set_dirty(curr->pml4, page->va, 0);
+    }
+    lock_release(&file_lock);
+
+    page->frame = NULL;
+    pml4_clear_page(curr->pml4, page->va);
+
+    return true;
 }
 
 /* Destory the file backed page. PAGE will be freed by the caller. */
@@ -51,15 +72,18 @@ file_backed_destroy(struct page *page) {
     struct file_page *file_page = &page->file;
 
     lock_acquire(&file_lock);
-    if (pml4_is_dirty(curr->pml4, page->va))
+    if (pml4_is_dirty(curr->pml4, page->va)) {
         file_write_at(file_page->file, page->frame->kva, file_page->page_read_bytes, file_page->ofs);
-    lock_release(&file_lock);
-
-    if (page->frame)
-        delete_frame(page->frame);
-    hash_delete(&curr->spt.spt_hash, &page->hash_elem);
+        pml4_set_dirty(curr->pml4, page->va, 0);
+    }
 
     pml4_clear_page(curr->pml4, page->va);
+    lock_release(&file_lock);
+
+    if (page->frame && page->frame->page == page)
+        delete_frame(page->frame);
+
+    hash_delete(&curr->spt.spt_hash, &page->hash_elem);
 }
 
 /* Do the mmap */
@@ -118,14 +142,6 @@ void do_munmap(void *addr) {
     lock_release(&file_lock);
 }
 
-void delete_frame(struct frame *frame) {
-    lock_acquire(&frame_lock);
-    list_remove(&frame->elem);
-    palloc_free_page(frame->kva);
-    free(frame);
-    lock_release(&frame_lock);
-}
-
 bool lazy_load_file_back(struct page *page, void *aux) {
     /* TODO: Load the segment from the file */
     /* TODO: This called when the first page fault occurs on address VA. */
@@ -134,12 +150,16 @@ bool lazy_load_file_back(struct page *page, void *aux) {
     /* Load this page. */
     struct lazy_load_aux *llaux = aux;
 
-    if (file_read_at(llaux->file, page->frame->kva, llaux->page_read_bytes, llaux->offset) != (int)llaux->page_read_bytes)
+    if (file_read_at(llaux->file, page->frame->kva, llaux->page_read_bytes, llaux->offset) != (int)llaux->page_read_bytes) {
+        // free(aux);
         return false;
+    }
 
     page->file.file = llaux->file;
     page->file.total_read_bytes = llaux->total_read_bytes;
     page->file.page_read_bytes = llaux->page_read_bytes;
     page->file.ofs = llaux->offset;
+
+    // free(aux);
     return true;
 }
