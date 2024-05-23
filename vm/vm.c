@@ -72,7 +72,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
             new_initializer = file_backed_initializer;
 
         uninit_new(newPage, upage, init, type, aux, new_initializer);
-        newPage->is_writable = writable;
+        newPage->is_page_writable = writable;
 
         /* TODO: Insert the page into the spt. */
         spt_insert_page(spt, newPage);
@@ -230,6 +230,19 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool us
         return vm_do_claim_page(page); // page찾으면 레이지로딩
     }
 
+    page = spt_find_page(spt, addr);
+
+    if(page && page->is_parent_writable)
+    {
+        void *parent_kva = page->frame->kva;
+
+        page->is_page_writable = true;
+        vm_do_claim_page(page);
+        memcpy(page->frame->kva, parent_kva, PGSIZE);
+        return true;
+    }
+    
+
     /* TODO: Your code goes here */
     return false;
 }
@@ -263,7 +276,7 @@ static bool vm_do_claim_page(struct page *page) {
     page->frame = frame;
 
     /* TODO: Insert page table entry to map page's VA to frame's PA. */
-    if (!pml4_set_page(curr->pml4, page->va, frame->kva, page->is_writable))
+    if (!pml4_set_page(curr->pml4, page->va, frame->kva, page->is_page_writable))
         return false;
 
     return swap_in(page, frame->kva);
@@ -289,15 +302,21 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
             // struct lazy_load_aux *aux = calloc(1, sizeof(struct lazy_load_aux));
             // memcpy(aux, src_page->uninit.aux, sizeof(struct lazy_load_aux));
             // if (!vm_alloc_page_with_initializer(src_page->uninit.type, src_page->va, src_page->is_writable, src_page->uninit.init, aux))
-            if (!vm_alloc_page_with_initializer(src_page->uninit.type, src_page->va, src_page->is_writable, src_page->uninit.init, src_page->uninit.aux))
+            if (!vm_alloc_page_with_initializer(src_page->uninit.type, src_page->va, src_page->is_page_writable, src_page->uninit.init, src_page->uninit.aux))
+            {
+                dst_page = spt_find_page(dst, src_page->va);
                 return false;
+            }
         } else {
-            if (!vm_alloc_page(type, src_page->va, src_page->is_writable))
+            if (!vm_alloc_page(type, src_page->va, 0))
                 return false;
-            if (!vm_claim_page(src_page->va))
-                return false;
+            // if (!vm_claim_page(src_page->va))
+                // return false;
             dst_page = spt_find_page(dst, src_page->va);
-            memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
+            dst_page->is_parent_writable = src_page->is_page_writable;
+            dst_page->frame = src_page->frame;
+            pml4_set_page(thread_current()->pml4, dst_page->va, src_page->frame->kva, 0);
+            // memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
         }
     }
     return true;

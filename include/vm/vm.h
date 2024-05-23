@@ -47,8 +47,10 @@ struct page {
     struct frame *frame; /* Back reference for frame */
 
     /* Your implementation */
-    bool is_writable;
+    bool is_page_writable;
+    bool is_parent_writable;
     struct hash_elem hash_elem;
+    // struct page *parent_page;
 
     /* Per-type data are binded into the union.
      * Each function automatically detects the current union */

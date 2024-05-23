@@ -36,6 +36,8 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva) {
 static bool
 file_backed_swap_in(struct page *page, void *kva) {
     struct file_page *file_page UNUSED = &page->file;
+    if (!file_page->file) 
+        return true;
     if (file_read_at(file_page->file, kva, file_page->page_read_bytes, file_page->ofs) != (int)file_page->page_read_bytes)
         return false;
     return true;
@@ -78,7 +80,7 @@ file_backed_destroy(struct page *page) {
     pml4_clear_page(curr->pml4, page->va);
     lock_release(&file_lock);
 
-    if (page->frame)
+    if (page->frame && page->frame->page == page)
         delete_frame(page->frame);
 
     hash_delete(&curr->spt.spt_hash, &page->hash_elem);
