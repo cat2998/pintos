@@ -80,7 +80,7 @@ file_backed_destroy(struct page *page) {
     pml4_clear_page(curr->pml4, page->va);
     lock_release(&file_lock);
 
-    if (page->frame && page->frame->page == page)
+    if (page->frame)
         delete_frame(page->frame);
 
     hash_delete(&curr->spt.spt_hash, &page->hash_elem);

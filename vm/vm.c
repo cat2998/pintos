@@ -315,6 +315,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
             dst_page = spt_find_page(dst, src_page->va);
             dst_page->is_parent_writable = src_page->is_page_writable;
             dst_page->frame = src_page->frame;
+            dst_page->frame->indegree_cnt += 1;
             pml4_set_page(thread_current()->pml4, dst_page->va, src_page->frame->kva, 0);
             // memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
         }
@@ -350,6 +351,10 @@ bool page_hash_less(const struct hash_elem *a, const struct hash_elem *b, void *
 void delete_frame(struct frame *frame) {
     ASSERT(frame != NULL);
     ASSERT(frame->page != NULL);
+    if(frame->indegree_cnt > 0) {
+        frame->indegree_cnt -= 1;
+        return;
+    }
     lock_acquire(&frame_lock);
     list_remove(&frame->elem);
     lock_release(&frame_lock);
