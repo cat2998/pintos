@@ -234,6 +234,9 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED, bool us
 
     if(page && page->is_parent_writable)
     {
+        lock_acquire(&frame_lock);
+        page->frame->indegree_cnt -= 1;
+        lock_release(&frame_lock);
         void *parent_kva = page->frame->kva;
 
         page->is_page_writable = true;
@@ -301,23 +304,38 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
         if (VM_TYPE(type) == VM_UNINIT) {
             // struct lazy_load_aux *aux = calloc(1, sizeof(struct lazy_load_aux));
             // memcpy(aux, src_page->uninit.aux, sizeof(struct lazy_load_aux));
-            // if (!vm_alloc_page_with_initializer(src_page->uninit.type, src_page->va, src_page->is_writable, src_page->uninit.init, aux))
             if (!vm_alloc_page_with_initializer(src_page->uninit.type, src_page->va, src_page->is_page_writable, src_page->uninit.init, src_page->uninit.aux))
             {
-                dst_page = spt_find_page(dst, src_page->va);
+                // dst_page = spt_find_page(dst, src_page->va);
+                return false;
+            }
+        } else if ((VM_TYPE(type) == VM_ANON)) {
+            dst_page = calloc(1, sizeof (struct page));
+            memcpy(dst_page, src_page, sizeof (struct page));
+            spt_insert_page(dst, dst_page);
+ 
+            dst_page->is_page_writable = false;
+            dst_page->is_parent_writable = src_page->is_page_writable;
+            lock_acquire(&frame_lock);
+            dst_page->frame->indegree_cnt += 1;
+            lock_release(&frame_lock);
+            if(pml4_set_page(thread_current()->pml4, dst_page->va, src_page->frame->kva, 0) == false){
                 return false;
             }
         } else {
-            if (!vm_alloc_page(type, src_page->va, 0))
-                return false;
-            // if (!vm_claim_page(src_page->va))
-                // return false;
-            dst_page = spt_find_page(dst, src_page->va);
+            dst_page = calloc(1, sizeof (struct page));
+            memcpy(dst_page, src_page, sizeof (struct page));
+            memcpy(&dst_page->file, &src_page->file, sizeof (struct file_page));
+            spt_insert_page(dst, dst_page);
+
+            dst_page->is_page_writable = false;
             dst_page->is_parent_writable = src_page->is_page_writable;
-            dst_page->frame = src_page->frame;
+            lock_acquire(&frame_lock);
             dst_page->frame->indegree_cnt += 1;
-            pml4_set_page(thread_current()->pml4, dst_page->va, src_page->frame->kva, 0);
-            // memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
+            lock_release(&frame_lock);
+            if(pml4_set_page(thread_current()->pml4, dst_page->va, src_page->frame->kva, 0) == false){
+                return false;
+            }
         }
     }
     return true;
@@ -351,11 +369,12 @@ bool page_hash_less(const struct hash_elem *a, const struct hash_elem *b, void *
 void delete_frame(struct frame *frame) {
     ASSERT(frame != NULL);
     ASSERT(frame->page != NULL);
+    lock_acquire(&frame_lock);
     if(frame->indegree_cnt > 0) {
         frame->indegree_cnt -= 1;
+        lock_release(&frame_lock);
         return;
     }
-    lock_acquire(&frame_lock);
     list_remove(&frame->elem);
     lock_release(&frame_lock);
     palloc_free_page(frame->kva);

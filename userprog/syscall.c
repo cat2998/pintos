@@ -139,7 +139,7 @@ void check_writable(uint64_t *ptr) {
 
     page = spt_find_page(&thread_current()->spt, ptr);
     ASSERT(page != NULL);
-    if (!page->is_page_writable)
+    if (!page->is_page_writable && !page->is_parent_writable)
         exit(-1);
 }
 

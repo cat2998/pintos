@@ -102,8 +102,15 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file, off_t 
             .total_read_bytes = total_read_bytes,
         };
 
-        if (!vm_alloc_page_with_initializer(VM_FILE, upage, writable, lazy_load_file_back, (void *)aux))
+        if (!vm_alloc_page_with_initializer(VM_FILE, upage, writable, lazy_load_file_back, aux))
             return false;
+        
+        // struct page *page = spt_find_page(&thread_current()->spt, upage);
+        // struct file_page *file_page = &page->file;
+        // file_page->file = file;
+        // file_page->ofs = offset;
+        // file_page->page_read_bytes = page_read_bytes;
+        // file_page->total_read_bytes = total_read_bytes;
 
         total_read_bytes -= page_read_bytes;
         offset += page_read_bytes;
@@ -150,6 +157,12 @@ bool lazy_load_file_back(struct page *page, void *aux) {
     /* Load this page. */
     struct lazy_load_aux *llaux = aux;
 
+    // struct file_page *file_page = &page->file;
+        // file_page->file = file;
+        // file_page->ofs = offset;
+        // file_page->page_read_bytes = page_read_bytes;
+        // file_page->total_read_bytes = total_read_bytes;
+// printf("!!!!!!!!!!!%p %d %d %d\n", file_page->file, file_page->ofs, file_page->page_read_bytes, file_page->total_read_bytes);
     if (file_read_at(llaux->file, page->frame->kva, llaux->page_read_bytes, llaux->offset) != (int)llaux->page_read_bytes) {
         // free(aux);
         return false;
