@@ -57,9 +57,9 @@ file_backed_swap_out(struct page *page) {
     }
     lock_release(&file_lock);
 
-    // page->frame->page = NULL;
-    // page->frame = NULL;
+    page->frame = NULL;
     pml4_clear_page(curr->pml4, page->va);
+
     return true;
 }
 
@@ -74,13 +74,13 @@ file_backed_destroy(struct page *page) {
         file_write_at(file_page->file, page->frame->kva, file_page->page_read_bytes, file_page->ofs);
         pml4_set_dirty(curr->pml4, page->va, 0);
     }
+
+    pml4_clear_page(curr->pml4, page->va);
     lock_release(&file_lock);
 
-    // pml4_clear_page(curr->pml4, page->va);
     if (page->frame)
         delete_frame(page->frame);
 
-    // free(page->uninit.aux);
     hash_delete(&curr->spt.spt_hash, &page->hash_elem);
 }
 
@@ -148,12 +148,16 @@ bool lazy_load_file_back(struct page *page, void *aux) {
     /* Load this page. */
     struct lazy_load_aux *llaux = aux;
 
-    if (file_read_at(llaux->file, page->frame->kva, llaux->page_read_bytes, llaux->offset) != (int)llaux->page_read_bytes)
+    if (file_read_at(llaux->file, page->frame->kva, llaux->page_read_bytes, llaux->offset) != (int)llaux->page_read_bytes) {
+        // free(aux);
         return false;
+    }
 
     page->file.file = llaux->file;
     page->file.total_read_bytes = llaux->total_read_bytes;
     page->file.page_read_bytes = llaux->page_read_bytes;
     page->file.ofs = llaux->offset;
+
+    // free(aux);
     return true;
 }

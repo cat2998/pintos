@@ -85,7 +85,6 @@ anon_swap_out(struct page *page) {
     lock_release(&swap_lock);
 
     anon_page->sec_no = sec_no;
-    page->frame->page = NULL;
     page->frame = NULL;
     pml4_clear_page(thread_current()->pml4, page->va);
 
@@ -105,19 +104,18 @@ static void
 anon_destroy(struct page *page) {
     struct anon_page *anon_page = &page->anon;
     struct thread *curr = thread_current();
-    
+
+    lock_acquire(&swap_lock);
     if (anon_page->sec_no != -1) {
-        lock_acquire(&swap_lock);
-        // disk_write(swap_disk,anon_page->sec_no);
         for (int i = 0; i < 8; i++)
             bitmap_set(swap_table, anon_page->sec_no + i, 0);
-        lock_release(&swap_lock);
     }
 
-    // pml4_clear_page(curr->pml4, page->va);
+    pml4_clear_page(curr->pml4, page->va);
+    lock_release(&swap_lock);
+
     if (page->frame)
         delete_frame(page->frame);
 
-    // free(page->uninit.aux);
     hash_delete(&curr->spt.spt_hash, &page->hash_elem);
 }

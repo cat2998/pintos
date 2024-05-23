@@ -4,6 +4,7 @@
 #include "threads/malloc.h"
 #include "vm/inspect.h"
 #include "threads/mmu.h"
+#include "userprog/process.h"
 #include <string.h>
 
 struct list frame_list;
@@ -285,6 +286,9 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
         enum vm_type type = src_page->operations->type;
 
         if (VM_TYPE(type) == VM_UNINIT) {
+            // struct lazy_load_aux *aux = calloc(1, sizeof(struct lazy_load_aux));
+            // memcpy(aux, src_page->uninit.aux, sizeof(struct lazy_load_aux));
+            // if (!vm_alloc_page_with_initializer(src_page->uninit.type, src_page->va, src_page->is_writable, src_page->uninit.init, aux))
             if (!vm_alloc_page_with_initializer(src_page->uninit.type, src_page->va, src_page->is_writable, src_page->uninit.init, src_page->uninit.aux))
                 return false;
         } else {
@@ -330,8 +334,6 @@ void delete_frame(struct frame *frame) {
     lock_acquire(&frame_lock);
     list_remove(&frame->elem);
     lock_release(&frame_lock);
-    frame->page->frame = NULL;
-    frame->page = NULL;
-    // palloc_free_page(frame->kva);
+    palloc_free_page(frame->kva);
     free(frame);
 }
