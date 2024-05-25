@@ -66,6 +66,7 @@ struct page {
 
 /* The representation of "frame" */
 struct frame {
+    int indegree_cnt;
     void *kva;
     struct page *page;
     struct list_elem elem;
